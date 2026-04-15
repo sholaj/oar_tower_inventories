@@ -1,0 +1,233 @@
+---
+# Flat File to Ansible Inventory Converter
+# Produces host metadata only - credentials handled by AAP2
+#
+# Input Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
+#   CONNECTION (optional, 7th column): WINRM or DIRECT (default: DIRECT)
+#
+# WinRM Support:
+#   - When CONNECTION=WINRM, sets use_winrm: true on the host
+#   - Default mode: -e "mssql_connection_mode=winrm" (no need to add WINRM to every line)
+#   - Per-line CONNECTION column overrides the default
+#   - WinRM credentials (winrm_username) injected by AAP2 Custom Credential
+#   - See docs/WINRM_PREREQUISITES.md for setup details
+
+- name: Convert Flat File to Inventory
+  hosts: localhost
+  gather_facts: true
+  vars:
+    input_file: "{{ flatfile_input | default('databases.txt') }}"
+    output_file: "{{ inventory_output | default('inventory.yml') }}"
+
+    # Optional: specify a delegate host for remote InSpec execution
+    # Leave empty for localhost execution (default)
+    delegate_host: "{{ inspec_delegate | default('') }}"
+    delegate_address: "{{ inspec_delegate_address | default('') }}"
+    delegate_user: "{{ inspec_delegate_user | default('ansible_svc') }}"
+
+    # Default connection mode for MSSQL when not specified in flat file
+    # Set to 'winrm' if all/most Windows SQL Servers use WinRM
+    # Per-line CONNECTION column overrides this default
+    mssql_default_connection: "{{ mssql_connection_mode | default('direct') }}"
+
+    # Inventory structure with group vars
+    inventory_data:
+      all:
+        children:
+          mssql_databases:
+            hosts: {}
+            vars:
+              mssql_username: nist_scan_user
+          oracle_databases:
+            hosts: {}
+            vars:
+              oracle_username: nist_scan_user
+          sybase_databases:
+            hosts: {}
+            vars:
+              sybase_username: nist_scan_user
+              sybase_use_ssh: true
+              sybase_ssh_user: sybase_admin
+          postgres_databases:
+            hosts: {}
+            vars:
+              postgres_username: nist_scan_user
+
+    platform_counts:
+      mssql: 0
+      oracle: 0
+      sybase: 0
+      postgres: 0
+
+    # Track WinRM hosts per platform
+    winrm_counts:
+      mssql: 0
+
+  tasks:
+    - name: Check input file exists
+      stat:
+        path: "{{ input_file }}"
+      register: input_stat
+
+    - name: Fail if input file missing
+      fail:
+        msg: "Input file not found: {{ input_file }}"
+      when: not input_stat.stat.exists
+
+    - name: Read flat file
+      slurp:
+        src: "{{ input_file }}"
+      register: flat_file
+
+    - name: Parse lines
+      set_fact:
+        lines: "{{ (flat_file.content | b64decode).split('\n') }}"
+
+    - name: Process each line
+      include_tasks: process_flatfile_line.yml
+      loop: "{{ lines }}"
+      loop_control:
+        index_var: idx
+        label: "Line {{ idx + 1 }}"
+      when:
+        - item | trim | length > 0
+        - not item.strip().startswith('#')
+
+    - name: Set execution mode to localhost (default)
+      set_fact:
+        inventory_data: "{{ inventory_data | combine({
+          'all': {
+            'children': inventory_data.all.children | combine({
+              'mssql_databases': {
+                'hosts': inventory_data.all.children.mssql_databases.hosts,
+                'vars': inventory_data.all.children.mssql_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_mssql_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'oracle_databases': {
+                'hosts': inventory_data.all.children.oracle_databases.hosts,
+                'vars': inventory_data.all.children.oracle_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_oracle_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'sybase_databases': {
+                'hosts': inventory_data.all.children.sybase_databases.hosts,
+                'vars': inventory_data.all.children.sybase_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_sybase_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'postgres_databases': {
+                'hosts': inventory_data.all.children.postgres_databases.hosts,
+                'vars': inventory_data.all.children.postgres_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_postgres_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              }
+            })
+          }
+        }, recursive=true) }}"
+      when: delegate_host | length == 0
+
+    - name: Add delegate host to inventory (if specified)
+      set_fact:
+        inventory_data: "{{ inventory_data | combine({
+          'all': {
+            'hosts': {
+              delegate_host: {
+                'ansible_host': delegate_address,
+                'ansible_connection': 'ssh',
+                'ansible_user': delegate_user,
+                'ansible_ssh_common_args': '-o StrictHostKeyChecking=accept-new'
+              }
+            },
+            'children': inventory_data.all.children | combine({
+              'mssql_databases': {
+                'hosts': inventory_data.all.children.mssql_databases.hosts,
+                'vars': inventory_data.all.children.mssql_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_mssql_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'oracle_databases': {
+                'hosts': inventory_data.all.children.oracle_databases.hosts,
+                'vars': inventory_data.all.children.oracle_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_oracle_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'sybase_databases': {
+                'hosts': inventory_data.all.children.sybase_databases.hosts,
+                'vars': inventory_data.all.children.sybase_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_sybase_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'postgres_databases': {
+                'hosts': inventory_data.all.children.postgres_databases.hosts,
+                'vars': inventory_data.all.children.postgres_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_postgres_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              }
+            })
+          }
+        }, recursive=true) }}"
+      when:
+        - delegate_host | length > 0
+        - delegate_address | length > 0
+
+    - name: Write inventory file
+      copy:
+        content: |
+          ---
+          # Generated Inventory - Database Compliance Scanning
+          # Credentials injected by AAP2 Custom Credential at runtime
+          #
+          # Execution modes:
+          #   inspec_delegate_host: "" = Run on target host
+          #   inspec_delegate_host: "<hostname>" = Delegate to remote host
+          #
+          # Connection modes (per-host):
+          #   use_winrm: false = Direct database connection (sqlcmd -S)
+          #   use_winrm: true = WinRM to Windows host, then local sqlcmd
+          #   WinRM credentials (winrm_username) injected by AAP2
+          #
+          # Generated: {{ ansible_date_time.iso8601 }}
+
+          {{ inventory_data | to_nice_yaml(indent=2) }}
+        dest: "{{ output_file }}"
+
+    - name: Summary
+      debug:
+        msg: |
+          Conversion complete: {{ output_file }}
+          - MSSQL: {{ platform_counts.mssql }} hosts ({{ winrm_counts.mssql }} WinRM)
+          - Oracle: {{ platform_counts.oracle }} hosts
+          - Sybase: {{ platform_counts.sybase }} hosts
+          - PostgreSQL: {{ platform_counts.postgres }} hosts
+          - Total: {{ platform_counts.mssql + platform_counts.oracle + platform_counts.sybase + platform_counts.postgres }} hosts
+          - MSSQL Default Connection: {{ mssql_default_connection | upper }}
+          {% if delegate_host | length > 0 %}
+          - Delegate Host: {{ delegate_host }} ({{ delegate_address }})
+          {% else %}
+          - Execution Mode: Localhost (on target host)
+          {% endif %}

@@ -1,0 +1,32 @@
+---
+# IMSWESTUAT Business Unit - Database Compliance Scanning Inventory
+# Environment: DEVTEST | Region: NA | BU: IMSWESTUAT
+
+all:
+  children:
+    db_imswestuat:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: imswestuat
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "[DELEGATE_HOST]"
+
+      hosts:
+        IMSDBSRV01_1433:
+          database_platform: mssql
+          mssql_server: "[DB_SERVER].example.internal"
+          mssql_port: 1433
+          mssql_version: "2017"
+          mssql_username: nist_scan_user
+          mssql_database: master
+
+        IMSSYBDB01_5000:
+          database_platform: sybase
+          sybase_server: "[DB_SERVER].example.internal"
+          sybase_port: 5000
+          sybase_service: IMSSYBDB01
+          sybase_version: "16"
+          sybase_username: nist_scan_user
+          sybase_database: master

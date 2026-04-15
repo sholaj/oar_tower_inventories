@@ -1,0 +1,32 @@
+---
+# CRDIT Business Unit - Database Compliance Scanning Inventory
+# Environment: DEVTEST | Region: NA | BU: CRDIT
+
+all:
+  children:
+    db_crdit:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: crdit
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "[DELEGATE_HOST]"
+
+      hosts:
+        CRDDBSRV01_1433:
+          database_platform: mssql
+          mssql_server: "[DB_SERVER].example.internal"
+          mssql_port: 1433
+          mssql_version: "2022"
+          mssql_username: nist_scan_user
+          mssql_database: master
+
+        CRDORADB01_1521:
+          database_platform: oracle
+          oracle_server: "[DB_SERVER].example.internal"
+          oracle_port: 1521
+          oracle_database: CRDDB
+          oracle_service: CRDDB
+          oracle_version: "12"
+          oracle_username: nist_scan_user

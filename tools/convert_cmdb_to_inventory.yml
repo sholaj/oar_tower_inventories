@@ -1,0 +1,326 @@
+---
+# CMDB CSV to Ansible Inventory Converter (fully self-contained)
+# Produces host metadata only - credentials handled by AAP2
+#
+# Input Format: CSV exports from CMDB (Oracle and/or MSSQL)
+#   Oracle CSV: Name (DB@SERVER), Category, Version, Validation Status, Permissions Status, Comments
+#   MSSQL CSV:  Name (INSTANCE@SERVER), Instance Name, Version name, Version, Validation Status,
+#               Permissions Status, Comments, Full version, Edition, TCP port(s), Class, Business Unit, Support group
+#
+# Usage:
+#   ansible-playbook convert_cmdb_to_inventory.yml \
+#     -e "cmdb_oracle_csv=/path/to/oracle.csv" \
+#     -e "cmdb_mssql_csv=/path/to/mssql.csv" \
+#     -e "inventory_output=cmdb_inventory.yml"
+
+- name: Convert CMDB CSV to Inventory
+  hosts: localhost
+  gather_facts: true
+  vars:
+    oracle_csv_file: "{{ cmdb_oracle_csv | default('') }}"
+    mssql_csv_file: "{{ cmdb_mssql_csv | default('') }}"
+    output_file: "{{ inventory_output | default('cmdb_inventory.yml') }}"
+
+    # Optional: specify a delegate host for remote InSpec execution
+    delegate_host: "{{ inspec_delegate | default('') }}"
+    delegate_address: "{{ inspec_delegate_address | default('') }}"
+    delegate_user: "{{ inspec_delegate_user | default('ansible_svc') }}"
+
+    # Oracle version mapping: CMDB dotted versions to InSpec short form
+    oracle_version_map:
+      "12": "12c"
+      "19": "19c"
+      "21": "21c"
+      "23": "23c"
+
+    # Default Oracle listener port (not present in CMDB export)
+    default_oracle_port: 1521
+
+    # Inventory structure with group vars
+    inventory_data:
+      all:
+        children:
+          oracle_databases:
+            hosts: {}
+            vars:
+              oracle_username: nist_scan_user
+              oracle_port: 1521
+          mssql_databases:
+            hosts: {}
+            vars:
+              mssql_username: nist_scan_user
+              mssql_database: master
+              mssql_port: 1433
+              business_unit: "{{ target_bu | default('') }}"
+
+    platform_counts:
+      oracle: 0
+      mssql: 0
+
+    skipped_counts:
+      oracle: 0
+      mssql: 0
+
+
+  tasks:
+    - name: Validate at least one CSV file provided
+      fail:
+        msg: "At least one CSV file must be provided: cmdb_oracle_csv or cmdb_mssql_csv"
+      when:
+        - oracle_csv_file | length == 0
+        - mssql_csv_file | length == 0
+
+    # ==================== Oracle CSV Processing ====================
+    - name: Check Oracle CSV exists
+      stat:
+        path: "{{ oracle_csv_file }}"
+      register: oracle_stat
+      when: oracle_csv_file | length > 0
+
+    - name: Fail if Oracle CSV not found
+      fail:
+        msg: "Oracle CSV file not found: {{ oracle_csv_file }}"
+      when:
+        - oracle_csv_file | length > 0
+        - oracle_stat is defined
+        - not oracle_stat.stat.exists
+
+    - name: Parse Oracle CSV with Python
+      ansible.builtin.shell: |
+        python3 -c "
+        import csv, json, sys
+        rows = []
+        with open(sys.argv[1], newline='', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(dict(row))
+        print(json.dumps(rows))
+        " '{{ oracle_csv_file }}'
+      register: oracle_csv_parsed
+      when:
+        - oracle_csv_file | length > 0
+        - oracle_stat is defined
+        - oracle_stat.stat.exists
+      changed_when: false
+
+    - name: Process Oracle entries
+      when:
+        - oracle_csv_parsed is defined
+        - oracle_csv_parsed is not skipped
+        - oracle_csv_parsed.rc == 0
+      block:
+        - name: Set Oracle rows
+          set_fact:
+            oracle_rows: "{{ oracle_csv_parsed.stdout | from_json }}"
+
+        - name: Process each Oracle row
+          vars:
+            oracle_db_name: "{{ item['Name'].split('@')[0] | default('') }}"
+            oracle_fqdn: "{{ item['Name'].split('@')[1] | default('') }}"
+            oracle_mapped_version: "{{ oracle_version_map[item['Version'].split('.')[0]] | default(item['Version'].split('.')[0] + 'c') }}"
+            host_id: "{{ (item['Name'].split('@')[0] + '_' + item['Name'].split('@')[1].split('.')[0] | default('unknown')) | replace('.', '_') | replace('-', '_') }}"
+          ansible.builtin.set_fact:
+            inventory_data: >-
+              {{ inventory_data | combine({
+                'all': {
+                  'children': {
+                    'oracle_databases': {
+                      'hosts': inventory_data.all.children.oracle_databases.hosts | combine({
+                        host_id: (
+                          {'oracle_server': oracle_fqdn, 'oracle_database': oracle_db_name, 'oracle_version': oracle_mapped_version}
+                        )
+                      })
+                    }
+                  }
+                }
+              }, recursive=true) }}
+            platform_counts: "{{ platform_counts | combine({'oracle': platform_counts.oracle + 1}) }}"
+          loop: "{{ oracle_rows }}"
+          loop_control:
+            index_var: idx
+            label: "Oracle row {{ idx + 1 }}"
+          when:
+            - "'validated' in (item['Validation Status'] | default('') | lower)"
+            - "'@' in item['Name'] | default('')"
+            - "(item['Name'].split('@')[1] | default('')) | length > 0"
+
+    # ==================== MSSQL CSV Processing ====================
+    - name: Check MSSQL CSV exists
+      stat:
+        path: "{{ mssql_csv_file }}"
+      register: mssql_stat
+      when: mssql_csv_file | length > 0
+
+    - name: Fail if MSSQL CSV not found
+      fail:
+        msg: "MSSQL CSV file not found: {{ mssql_csv_file }}"
+      when:
+        - mssql_csv_file | length > 0
+        - mssql_stat is defined
+        - not mssql_stat.stat.exists
+
+    - name: Parse MSSQL CSV with Python
+      ansible.builtin.shell: |
+        python3 -c "
+        import csv, json, sys
+        rows = []
+        with open(sys.argv[1], newline='', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(dict(row))
+        print(json.dumps(rows))
+        " '{{ mssql_csv_file }}'
+      register: mssql_csv_parsed
+      when:
+        - mssql_csv_file | length > 0
+        - mssql_stat is defined
+        - mssql_stat.stat.exists
+      changed_when: false
+
+    - name: Process MSSQL entries
+      when:
+        - mssql_csv_parsed is defined
+        - mssql_csv_parsed is not skipped
+        - mssql_csv_parsed.rc == 0
+      block:
+        - name: Set MSSQL rows
+          set_fact:
+            mssql_rows: "{{ mssql_csv_parsed.stdout | from_json }}"
+
+        - name: Process each MSSQL row
+          vars:
+            version_name: "{{ item['Version name'] | default('') }}"
+            mssql_instance_name: "{{ item['Name'].split('@')[0] | default('') }}"
+            mssql_fqdn: "{{ item['Name'].split('@')[1] | default('') }}"
+            mssql_port: "{{ item['TCP port(s)'] | default('') if (item['TCP port(s)'] | default('') | trim | length > 0) else '1433' }}"
+            host_id: "{{ (item['Name'].split('@')[1].split('.')[0] | default('unknown') + '_' + (item['TCP port(s)'] | default('') if (item['TCP port(s)'] | default('') | trim | length > 0) else '1433')) | replace('.', '_') | replace('-', '_') }}"
+          ansible.builtin.set_fact:
+            inventory_data: >-
+              {{ inventory_data | combine({
+                'all': {
+                  'children': {
+                    'mssql_databases': {
+                      'hosts': inventory_data.all.children.mssql_databases.hosts | combine({
+                        host_id: (
+                          {'mssql_server': mssql_fqdn, 'mssql_version': version_name, 'mssql_instance': mssql_instance_name}
+                          | combine({'mssql_port': mssql_port | int} if (mssql_port | string != '1433') else {})
+                        )
+                      })
+                    }
+                  }
+                }
+              }, recursive=true) }}
+            platform_counts: "{{ platform_counts | combine({'mssql': platform_counts.mssql + 1}) }}"
+          loop: "{{ mssql_rows }}"
+          loop_control:
+            index_var: idx
+            label: "MSSQL row {{ idx + 1 }}"
+          when:
+            - "'validated' in (item['Validation Status'] | default('') | lower)"
+            - "'@' in item['Name'] | default('')"
+            - "(item['Name'].split('@')[1] | default('')) | length > 0"
+            - "host_id not in inventory_data.all.children.mssql_databases.hosts"
+
+    # ==================== Set Execution Mode ====================
+    - name: Set execution mode to localhost (default)
+      set_fact:
+        inventory_data: "{{ inventory_data | combine({
+          'all': {
+            'children': inventory_data.all.children | combine({
+              'oracle_databases': {
+                'hosts': inventory_data.all.children.oracle_databases.hosts,
+                'vars': inventory_data.all.children.oracle_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_oracle_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'mssql_databases': {
+                'hosts': inventory_data.all.children.mssql_databases.hosts,
+                'vars': inventory_data.all.children.mssql_databases.vars | combine({
+                  'inspec_delegate_host': '',
+                  'inspec_results_dir': '/tmp/inspec_mssql_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              }
+            })
+          }
+        }, recursive=true) }}"
+      when: delegate_host | length == 0
+
+    - name: Add delegate host to inventory (if specified)
+      set_fact:
+        inventory_data: "{{ inventory_data | combine({
+          'all': {
+            'hosts': {
+              delegate_host: {
+                'ansible_host': delegate_address,
+                'ansible_connection': 'ssh',
+                'ansible_user': delegate_user,
+                'ansible_ssh_common_args': '-o StrictHostKeyChecking=accept-new'
+              }
+            },
+            'children': inventory_data.all.children | combine({
+              'oracle_databases': {
+                'hosts': inventory_data.all.children.oracle_databases.hosts,
+                'vars': inventory_data.all.children.oracle_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_oracle_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              },
+              'mssql_databases': {
+                'hosts': inventory_data.all.children.mssql_databases.hosts,
+                'vars': inventory_data.all.children.mssql_databases.vars | combine({
+                  'inspec_delegate_host': delegate_host,
+                  'inspec_results_dir': '/tmp/inspec_mssql_results',
+                  'inspec_debug_mode': false,
+                  'generate_summary_report': true
+                })
+              }
+            })
+          }
+        }, recursive=true) }}"
+      when:
+        - delegate_host | length > 0
+        - delegate_address | length > 0
+
+    # ==================== Write Output ====================
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_file | dirname }}"
+        state: directory
+        mode: '0755'
+      when: output_file | dirname | length > 0 and output_file | dirname != '.'
+
+    - name: Write inventory file
+      copy:
+        content: |
+          ---
+          # Generated Inventory - Database Compliance Scanning (CMDB Source)
+          # Credentials injected by AAP2 Custom Credential at runtime
+          #
+          # Source CMDB files:
+          #   Oracle: {{ oracle_csv_file if oracle_csv_file | length > 0 else 'N/A' }}
+          #   MSSQL:  {{ mssql_csv_file if mssql_csv_file | length > 0 else 'N/A' }}
+          # Generated: {{ ansible_date_time.iso8601 }}
+          #
+
+          {{ inventory_data | to_nice_yaml(indent=2) }}
+        dest: "{{ output_file }}"
+
+    - name: Summary
+      debug:
+        msg: |
+          Conversion complete: {{ output_file }}
+          - Oracle: {{ platform_counts.oracle }} hosts ({{ skipped_counts.oracle }} skipped)
+          - MSSQL:  {{ platform_counts.mssql }} hosts ({{ skipped_counts.mssql }} skipped)
+          - Total:  {{ platform_counts.oracle + platform_counts.mssql }} hosts
+          {% if delegate_host | length > 0 %}
+          - Delegate Host: {{ delegate_host }} ({{ delegate_address }})
+          {% else %}
+          - Execution Mode: Localhost
+          {% endif %}

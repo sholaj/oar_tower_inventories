@@ -1,0 +1,105 @@
+---
+# Process single row from Oracle CMDB CSV export
+# Required columns: Name, Version, Validation Status, Comments
+# Extracts per-host: oracle_server, oracle_database, oracle_version
+
+- name: Reset per-row state
+  ansible.builtin.set_fact:
+    has_connection_warning: false
+    oracle_fqdn: ''
+    host_id: ''
+
+- name: Parse Oracle CSV fields
+  ansible.builtin.set_fact:
+    fields: "{{ item.split(',') | map('trim') | list }}"
+
+- name: Skip rows with insufficient columns
+  when: fields | length < (oracle_col_map.values() | max) + 1
+  block:
+    - name: Log skipped Oracle row
+      ansible.builtin.debug:
+        msg: "Skipping Oracle row {{ idx + 1 }}: insufficient fields ({{ fields | length }})"
+
+    - name: Increment Oracle skipped count
+      ansible.builtin.set_fact:
+        skipped_counts: "{{ skipped_counts | combine({'oracle': skipped_counts.oracle + 1}) }}"
+
+- name: Process Oracle entry
+  when: fields | length >= (oracle_col_map.values() | max) + 1
+  block:
+    - name: Extract Oracle fields
+      ansible.builtin.set_fact:
+        raw_name: "{{ fields[oracle_col_map['Name'] | int] }}"
+        raw_version: "{{ fields[oracle_col_map['Version'] | int] }}"
+        validation_status: "{{ fields[oracle_col_map['Validation Status'] | int] }}"
+        comments: "{{ fields[oracle_col_map['Comments'] | int] }}"
+
+    - name: Skip non-validated Oracle entries
+      when: "'validated' not in (validation_status | lower)"
+      block:
+        - name: Log skipped non-validated Oracle entry
+          ansible.builtin.debug:
+            msg: "Skipping Oracle row {{ idx + 1 }} ({{ raw_name }}): not validated"
+
+        - name: Increment Oracle skipped count for non-validated
+          ansible.builtin.set_fact:
+            skipped_counts: "{{ skipped_counts | combine({'oracle': skipped_counts.oracle + 1}) }}"
+
+    - name: Process validated Oracle entry
+      when: "'validated' in (validation_status | lower)"
+      block:
+        - name: Parse Oracle Name field (DATABASE@SERVER)
+          ansible.builtin.set_fact:
+            oracle_db_name: "{{ raw_name.split('@')[0] }}"
+            oracle_fqdn: "{{ raw_name.split('@')[1] | default('') }}"
+
+        - name: Log invalid Oracle Name format
+          ansible.builtin.debug:
+            msg: "Skipping Oracle row {{ idx + 1 }}: invalid Name '{{ raw_name }}' (expected DB@SERVER)"
+          when: oracle_fqdn | length == 0
+
+        - name: Add Oracle host to inventory
+          when: oracle_fqdn | length > 0
+          block:
+            - name: Map Oracle version
+              ansible.builtin.set_fact:
+                oracle_mapped_version: "{{ oracle_version_map[raw_version.split('.')[0]] | default(raw_version.split('.')[0] + 'c') }}"
+
+            - name: Create Oracle host ID
+              ansible.builtin.set_fact:
+                host_id: "{{ (oracle_db_name + '_' + oracle_fqdn.split('.')[0]) | replace('.', '_') | replace('-', '_') }}"
+
+            - name: Check for connection warnings
+              ansible.builtin.set_fact:
+                has_connection_warning: "{{ ('unable to connect' in (comments | lower)) or ('unable to validate' in (comments | lower)) }}"
+
+            - name: Track Oracle connection issue
+              ansible.builtin.set_fact:
+                connection_issues: "{{ connection_issues + ['Oracle: ' + raw_name + ' - ' + comments] }}"
+              when: has_connection_warning | bool
+
+            - name: Add Oracle host entry
+              ansible.builtin.set_fact:
+                inventory_data: >-
+                  {{ inventory_data | combine({
+                    'all': {
+                      'children': {
+                        'oracle_databases': {
+                          'hosts': inventory_data.all.children.oracle_databases.hosts | combine({
+                            host_id: host_entry
+                          })
+                        }
+                      }
+                    }
+                  }, recursive=true) }}
+              vars:
+                base_entry:
+                  oracle_server: "{{ oracle_fqdn }}"
+                  oracle_database: "{{ oracle_db_name }}"
+                  oracle_version: "{{ oracle_mapped_version }}"
+                warning_entry: "{{ {'cmdb_connection_warning': comments} if (has_connection_warning | bool) else {} }}"
+                host_entry: "{{ base_entry | combine(warning_entry) }}"
+
+            - name: Increment Oracle host count
+              ansible.builtin.set_fact:
+                platform_counts: "{{ platform_counts | combine({'oracle': platform_counts.oracle + 1}) }}"

@@ -1,0 +1,152 @@
+---
+# Process single line from flat file
+# Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
+# CONNECTION is optional (7th column): WINRM or DIRECT (default: DIRECT)
+
+- name: Parse line
+  set_fact:
+    parts: "{{ item.strip().split() }}"
+
+- name: Skip invalid lines
+  debug:
+    msg: "Skipping line {{ idx + 1 }}: expected 6-7 fields, got {{ parts | length }}"
+  when: parts | length < 6 or parts | length > 7
+
+- name: Process valid entry
+  when: parts | length >= 6 and parts | length <= 7
+  block:
+    - name: Extract fields
+      set_fact:
+        platform: "{{ parts[0] | upper }}"
+        server: "{{ parts[1] }}"
+        database: "{{ parts[2] }}"
+        service: "{{ parts[3] }}"
+        port: "{{ parts[4] }}"
+        version: "{{ parts[5] }}"
+        # Use explicit column value if present, otherwise use platform default
+        connection_mode: "{{ (parts[6] | upper) if parts | length == 7 else (mssql_default_connection | upper) if parts[0] | upper == 'MSSQL' else 'DIRECT' }}"
+
+    - name: Determine WinRM usage
+      set_fact:
+        use_winrm: "{{ connection_mode == 'WINRM' }}"
+
+    - name: Create host ID
+      set_fact:
+        host_id: "{{ (server + '_' + port) | replace('.', '_') | replace('-', '_') if platform == 'MSSQL' else (server + '_' + database + '_' + port) | replace('.', '_') | replace('-', '_') }}"
+
+    # MSSQL - server level (deduplicate)
+    - name: Add MSSQL host
+      when: platform == 'MSSQL' and host_id not in inventory_data.all.children.mssql_databases.hosts
+      block:
+        - set_fact:
+            inventory_data: "{{ inventory_data | combine({
+              'all': {
+                'children': {
+                  'mssql_databases': {
+                    'hosts': inventory_data.all.children.mssql_databases.hosts | combine({
+                      host_id: {
+                        'mssql_server': server,
+                        'mssql_port': port | int,
+                        'mssql_version': version,
+                        'database_platform': 'mssql',
+                        'use_winrm': use_winrm
+                      }
+                    })
+                  }
+                }
+              }
+            }, recursive=true) }}"
+        - set_fact:
+            platform_counts: "{{ platform_counts | combine({'mssql': platform_counts.mssql + 1}) }}"
+        - set_fact:
+            winrm_counts: "{{ winrm_counts | combine({'mssql': winrm_counts.mssql + (1 if use_winrm else 0)}) }}"
+          when: winrm_counts is defined
+
+    - name: Skip duplicate MSSQL
+      when: platform == 'MSSQL' and host_id in inventory_data.all.children.mssql_databases.hosts
+      debug:
+        msg: "Duplicate MSSQL: {{ server }}:{{ port }}"
+
+    # Oracle - database level
+    - name: Add Oracle host
+      when: platform == 'ORACLE'
+      block:
+        - set_fact:
+            inventory_data: "{{ inventory_data | combine({
+              'all': {
+                'children': {
+                  'oracle_databases': {
+                    'hosts': inventory_data.all.children.oracle_databases.hosts | combine({
+                      host_id: {
+                        'oracle_server': server,
+                        'oracle_database': database,
+                        'oracle_service': service if service != 'null' else '',
+                        'oracle_port': port | int,
+                        'oracle_version': version,
+                        'database_platform': 'oracle'
+                      }
+                    })
+                  }
+                }
+              }
+            }, recursive=true) }}"
+        - set_fact:
+            platform_counts: "{{ platform_counts | combine({'oracle': platform_counts.oracle + 1}) }}"
+
+    # Sybase - database level
+    - name: Add Sybase host
+      when: platform == 'SYBASE'
+      block:
+        - set_fact:
+            inventory_data: "{{ inventory_data | combine({
+              'all': {
+                'children': {
+                  'sybase_databases': {
+                    'hosts': inventory_data.all.children.sybase_databases.hosts | combine({
+                      host_id: {
+                        'sybase_server': server,
+                        'sybase_database': database,
+                        'sybase_service': service if service != 'null' else '',
+                        'sybase_port': port | int,
+                        'sybase_version': version,
+                        'database_platform': 'sybase'
+                      }
+                    })
+                  }
+                }
+              }
+            }, recursive=true) }}"
+        - set_fact:
+            platform_counts: "{{ platform_counts | combine({'sybase': platform_counts.sybase + 1}) }}"
+
+    # PostgreSQL - database level
+    - name: Add PostgreSQL host
+      when: platform == 'POSTGRES' or platform == 'POSTGRESQL'
+      block:
+        - set_fact:
+            inventory_data: "{{ inventory_data | combine({
+              'all': {
+                'children': {
+                  'postgres_databases': {
+                    'hosts': inventory_data.all.children.postgres_databases.hosts | combine({
+                      host_id: {
+                        'postgres_server': server,
+                        'postgres_database': database,
+                        'postgres_service': service if service != 'null' else '',
+                        'postgres_port': port | int,
+                        'postgres_version': version,
+                        'database_platform': 'postgres'
+                      }
+                    })
+                  }
+                }
+              }
+            }, recursive=true) }}"
+        - set_fact:
+            platform_counts: "{{ platform_counts | combine({'postgres': platform_counts.postgres + 1}) }}"
+
+    # Warn on unknown platform
+    - name: Warn on unknown platform
+      when: platform not in ['MSSQL', 'ORACLE', 'SYBASE', 'POSTGRES', 'POSTGRESQL']
+      debug:
+        msg: "WARNING: Unknown platform '{{ platform }}' on line {{ idx + 1 }}, skipping"
