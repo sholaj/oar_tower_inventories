@@ -1,12 +1,10 @@
 ---
-# Process single row from MSSQL CMDB CSV export
-# Required columns: Name, Version name, Validation Status, Comments, TCP port(s)
-# Extracts per-host: mssql_server, mssql_version, mssql_instance
-# mssql_port only included when non-standard (!= 1433, which is the group default)
-#
-# NOTE: This is a task list, not a standalone playbook.
-# It is called via include_tasks from convert_cmdb_to_inventory.yml
-# which provides: item, idx, mssql_col_map, inventory_data, etc.
+# Process single MSSQL CMDB row (DictReader output, called from convert_cmdb_to_inventory.yml).
+# Expected dict keys: Name (INSTANCE@SERVER.DOMAIN), Version name, Validation Status,
+#                     Comments, TCP port(s)
+# Server-level dedup: one host per (server, port). Emits database_platform=mssql.
+# Connection warnings are NOT written to the inventory; they are appended to
+# connection_warnings (sidecar diagnostics) instead.
 
 - name: Reset per-row state
   ansible.builtin.set_fact:
@@ -14,107 +12,92 @@
     mssql_fqdn: ''
     host_id: ''
 
-- name: Parse MSSQL CSV fields
+- name: Compute MSSQL validation flag
   ansible.builtin.set_fact:
-    fields: "{{ item.split(',') | map('trim') | list }}"
+    is_validated: >-
+      {{ ('validated' in (item['Validation Status'] | default('') | lower))
+         and ('not validated' not in (item['Validation Status'] | default('') | lower)) }}
 
-- name: Skip rows with insufficient columns
-  when: fields | length < (mssql_col_map.values() | max) + 1
+- name: Increment MSSQL skipped count (not validated)
+  ansible.builtin.set_fact:
+    skipped_counts: "{{ skipped_counts | combine({'mssql': skipped_counts.mssql + 1}) }}"
+  when: not (is_validated | bool)
+
+- name: Process validated MSSQL entry
+  when: is_validated | bool
   block:
-    - name: Log skipped MSSQL row
-      ansible.builtin.debug:
-        msg: "Skipping MSSQL row {{ idx + 1 }}: insufficient fields ({{ fields | length }})"
-
-    - name: Increment MSSQL skipped count
+    - name: Parse Name (INSTANCE@SERVER)
       ansible.builtin.set_fact:
-        skipped_counts: "{{ skipped_counts | combine({'mssql': skipped_counts.mssql + 1}) }}"
+        raw_name: "{{ item['Name'] | default('') }}"
+        mssql_instance_name: "{{ (item['Name'] | default('')).split('@')[0] }}"
+        mssql_fqdn: "{{ ((item['Name'] | default('')).split('@')[1] | default('')) }}"
+        version_name: "{{ item['Version name'] | default('') }}"
+        cp_port: "{{ item['TCP port(s)'] | default('') }}"
+        comments: "{{ item['Comments'] | default('') }}"
 
-- name: Process MSSQL entry
-  when: fields | length >= (mssql_col_map.values() | max) + 1
-  block:
-    - name: Extract MSSQL fields
-      ansible.builtin.set_fact:
-        raw_name: "{{ fields[mssql_col_map['Name'] | int] }}"
-        version_name: "{{ fields[mssql_col_map['Version name'] | int] }}"
-        validation_status: "{{ fields[mssql_col_map['Validation Status'] | int] }}"
-        comments: "{{ fields[mssql_col_map['Comments'] | int] }}"
-        cp_port: "{{ fields[mssql_col_map['TCP port(s)'] | int] }}"
-
-    - name: Skip non-validated MSSQL entries
-      when: "'validated' not in (validation_status | lower)"
+    - name: Skip MSSQL entries with invalid Name format
+      when: mssql_fqdn | length == 0
       block:
-        - name: Log skipped non-validated MSSQL entry
+        - name: Log skipped MSSQL entry (bad Name)
           ansible.builtin.debug:
-            msg: "Skipping MSSQL row {{ idx + 1 }} ({{ raw_name }}): not validated"
-
-        - name: Increment MSSQL skipped count for non-validated
+            msg: "Skipping MSSQL row {{ idx + 1 }}: invalid Name '{{ raw_name }}' (expected INSTANCE@SERVER)"
+        - name: Increment MSSQL skipped count (bad name)
           ansible.builtin.set_fact:
             skipped_counts: "{{ skipped_counts | combine({'mssql': skipped_counts.mssql + 1}) }}"
 
-    - name: Process validated MSSQL entry
-      when: "'validated' in (validation_status | lower)"
+    - name: Add MSSQL host to inventory (server-level dedup)
+      when: mssql_fqdn | length > 0
       block:
-        - name: Parse MSSQL Name field (INSTANCE@SERVER)
+        - name: Determine MSSQL port
           ansible.builtin.set_fact:
-            mssql_instance_name: "{{ raw_name.split('@')[0] }}"
-            mssql_fqdn: "{{ raw_name.split('@')[1] | default('') }}"
+            mssql_port: "{{ cp_port if (cp_port | trim | length > 0) else '1433' }}"
 
-        - name: Log invalid MSSQL Name format
+        - name: Build MSSQL host_id (server:port)
+          ansible.builtin.set_fact:
+            host_id: "{{ (mssql_fqdn.split('.')[0] + '_' + mssql_port | string) | replace('.', '_') | replace('-', '_') }}"
+
+        - name: Log duplicate MSSQL server
           ansible.builtin.debug:
-            msg: "Skipping MSSQL row {{ idx + 1 }}: invalid Name '{{ raw_name }}' (expected INSTANCE@SERVER)"
-          when: mssql_fqdn | length == 0
+            msg: "Duplicate MSSQL: {{ mssql_fqdn }}:{{ mssql_port }} (instance {{ mssql_instance_name }})"
+          when: host_id in inventory_data.all.children[bu_group].hosts
 
-        - name: Add MSSQL host to inventory
-          when: mssql_fqdn | length > 0
-          block:
-            - name: Determine port
-              ansible.builtin.set_fact:
-                mssql_port: "{{ cp_port if (cp_port | trim | length > 0) else '1433' }}"
+        - name: Detect connection warnings (new MSSQL hosts only)
+          ansible.builtin.set_fact:
+            has_connection_warning: "{{ ('unable to connect' in (comments | lower)) or ('unable to validate' in (comments | lower)) }}"
+          when: host_id not in inventory_data.all.children[bu_group].hosts
 
-            - name: Create MSSQL host ID (server-level dedup)
-              ansible.builtin.set_fact:
-                host_id: "{{ (mssql_fqdn.split('.')[0] + '_' + mssql_port | string) | replace('.', '_') | replace('-', '_') }}"
+        - name: Append MSSQL warning to diagnostics list
+          ansible.builtin.set_fact:
+            connection_warnings: "{{ connection_warnings + [{'platform': 'mssql', 'host': raw_name, 'comment': comments}] }}"
+          when:
+            - host_id not in inventory_data.all.children[bu_group].hosts
+            - has_connection_warning | bool
 
-            - name: Log duplicate MSSQL server
-              ansible.builtin.debug:
-                msg: "Duplicate MSSQL: {{ mssql_fqdn }}:{{ mssql_port }} (instance {{ mssql_instance_name }})"
-              when: host_id in inventory_data.all.children.mssql_databases.hosts
-
-            - name: Add new MSSQL host
-              when: host_id not in inventory_data.all.children.mssql_databases.hosts
-              block:
-                - name: Check for connection warnings
-                  ansible.builtin.set_fact:
-                    has_connection_warning: "{{ ('unable to connect' in (comments | lower)) or ('unable to validate' in (comments | lower)) }}"
-
-                - name: Track MSSQL connection issue
-                  ansible.builtin.set_fact:
-                    connection_issues: "{{ connection_issues + ['MSSQL: ' + raw_name + ' - ' + comments] }}"
-                  when: has_connection_warning | bool
-
-                - name: Add MSSQL host entry
-                  ansible.builtin.set_fact:
-                    inventory_data: >-
-                      {{ inventory_data | combine({
-                        'all': {
-                          'children': {
-                            'mssql_databases': {
-                              'hosts': inventory_data.all.children.mssql_databases.hosts | combine({
-                                host_id: host_entry
-                              })
-                            }
-                          }
+        # NOTE: host-add and counter-bump are merged into one set_fact. With a
+        # block-level `when: host_id not in ...hosts`, the second task would
+        # skip because Ansible re-evaluates the block when per task and the
+        # host has just been added.
+        - name: Add new MSSQL host (server-level dedup)
+          when: host_id not in inventory_data.all.children[bu_group].hosts
+          ansible.builtin.set_fact:
+            inventory_data: >-
+              {{ inventory_data | combine({
+                'all': {
+                  'children': {
+                    bu_group: {
+                      'hosts': inventory_data.all.children[bu_group].hosts | combine({
+                        host_id: {
+                          'database_platform': 'mssql',
+                          'mssql_server': mssql_fqdn,
+                          'mssql_port': mssql_port | int,
+                          'mssql_version': version_name,
+                          'mssql_instance': mssql_instance_name,
+                          'mssql_database': 'master',
+                          'mssql_username': 'nist_scan_user'
                         }
-                      }, recursive=true) }}
-                  vars:
-                    base_entry:
-                      mssql_server: "{{ mssql_fqdn }}"
-                      mssql_version: "{{ version_name }}"
-                      mssql_instance: "{{ mssql_instance_name }}"
-                    port_entry: "{{ {'mssql_port': mssql_port | int} if (mssql_port | string != '1433') else {} }}"
-                    warning_entry: "{{ {'cmdb_connection_warning': comments} if (has_connection_warning | bool) else {} }}"
-                    host_entry: "{{ base_entry | combine(port_entry) | combine(warning_entry) }}"
-
-                - name: Increment MSSQL host count
-                  ansible.builtin.set_fact:
-                    platform_counts: "{{ platform_counts | combine({'mssql': platform_counts.mssql + 1}) }}"
+                      })
+                    }
+                  }
+                }
+              }, recursive=true) }}
+            platform_counts: "{{ platform_counts | combine({'mssql': platform_counts.mssql + 1}) }}"

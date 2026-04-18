@@ -1,57 +1,42 @@
 ---
-# Flat File to Ansible Inventory Converter
-# Produces host metadata only - credentials handled by AAP2
+# Flat File to Ansible Inventory Converter (BU-based output)
+# Produces host metadata only - credentials handled by AAP2.
 #
 # Input Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
 #   CONNECTION (optional, 7th column): WINRM or DIRECT (default: DIRECT)
 #
-# WinRM Support:
-#   - When CONNECTION=WINRM, sets use_winrm: true on the host
-#   - Default mode: -e "mssql_connection_mode=winrm" (no need to add WINRM to every line)
-#   - Per-line CONNECTION column overrides the default
-#   - WinRM credentials (winrm_username) injected by AAP2 Custom Credential
-#   - See docs/WINRM_PREREQUISITES.md for setup details
+# Required parameters:
+#   target_bu        - Business unit identifier (lowercase, e.g., corp)
+#   ssc_environment  - Environment label for ssc_sn_environment (e.g., test, prod)
+#   ssc_region       - Region label for ssc_sn_region (e.g., na, eu, apac)
+#   flatfile_input   - Path to the flat-file input
+#   inventory_output - Path to the generated inventory file
+#
+# Optional:
+#   inspec_delegate_host    - Delegate host for InSpec execution (default: "")
+#   mssql_connection_mode   - 'winrm' or 'direct' default for MSSQL (default: direct)
+#   sybase_ssh_user_default - Default SSH user for Sybase scans (default: sybase_admin)
+#   exec_timeout            - Per-host scan timeout seconds (default: 600)
 
-- name: Convert Flat File to Inventory
+- name: Convert Flat File to BU-based Inventory
   hosts: localhost
   gather_facts: true
   vars:
-    input_file: "{{ flatfile_input | default('databases.txt') }}"
-    output_file: "{{ inventory_output | default('inventory.yml') }}"
+    input_file: "{{ flatfile_input }}"
+    output_file: "{{ inventory_output }}"
 
-    # Optional: specify a delegate host for remote InSpec execution
-    # Leave empty for localhost execution (default)
-    delegate_host: "{{ inspec_delegate | default('') }}"
-    delegate_address: "{{ inspec_delegate_address | default('') }}"
-    delegate_user: "{{ inspec_delegate_user | default('ansible_svc') }}"
+    bu_group: "db_{{ target_bu }}"
 
-    # Default connection mode for MSSQL when not specified in flat file
-    # Set to 'winrm' if all/most Windows SQL Servers use WinRM
-    # Per-line CONNECTION column overrides this default
+    delegate_host: "{{ inspec_delegate_host | default('') }}"
     mssql_default_connection: "{{ mssql_connection_mode | default('direct') }}"
+    sybase_ssh_user_value: "{{ sybase_ssh_user_default | default('sybase_admin') }}"
+    exec_timeout_value: "{{ exec_timeout | default(600) }}"
 
-    # Inventory structure with group vars
+    # NOTE: dict keys are not templated in `vars:`; the BU group is built
+    # in pre_tasks via set_fact so the key resolves correctly at runtime.
     inventory_data:
       all:
-        children:
-          mssql_databases:
-            hosts: {}
-            vars:
-              mssql_username: nist_scan_user
-          oracle_databases:
-            hosts: {}
-            vars:
-              oracle_username: nist_scan_user
-          sybase_databases:
-            hosts: {}
-            vars:
-              sybase_username: nist_scan_user
-              sybase_use_ssh: true
-              sybase_ssh_user: sybase_admin
-          postgres_databases:
-            hosts: {}
-            vars:
-              postgres_username: nist_scan_user
+        children: {}
 
     platform_counts:
       mssql: 0
@@ -59,32 +44,59 @@
       sybase: 0
       postgres: 0
 
-    # Track WinRM hosts per platform
     winrm_counts:
       mssql: 0
 
+  pre_tasks:
+    - name: Validate required parameters
+      ansible.builtin.fail:
+        msg: "Missing required parameter: {{ item }}"
+      when: lookup('vars', item, default='') | length == 0
+      loop:
+        - target_bu
+        - ssc_environment
+        - ssc_region
+        - flatfile_input
+        - inventory_output
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Initialize BU group (templated key)
+      ansible.builtin.set_fact:
+        inventory_data:
+          all:
+            children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+      vars:
+        bu_vars:
+          ssc_sn_environment: "{{ ssc_environment }}"
+          ssc_sn_region: "{{ ssc_region }}"
+          ssc_sn_bu: "{{ target_bu }}"
+          exec_timeout: "{{ exec_timeout_value }}"
+          ansible_connection: local
+          inspec_delegate_host: "{{ delegate_host }}"
+
   tasks:
     - name: Check input file exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ input_file }}"
       register: input_stat
 
     - name: Fail if input file missing
-      fail:
+      ansible.builtin.fail:
         msg: "Input file not found: {{ input_file }}"
       when: not input_stat.stat.exists
 
     - name: Read flat file
-      slurp:
+      ansible.builtin.slurp:
         src: "{{ input_file }}"
       register: flat_file
 
     - name: Parse lines
-      set_fact:
+      ansible.builtin.set_fact:
         lines: "{{ (flat_file.content | b64decode).split('\n') }}"
 
     - name: Process each line
-      include_tasks: process_flatfile_line.yml
+      ansible.builtin.include_tasks: process_flatfile_line.yml
       loop: "{{ lines }}"
       loop_control:
         index_var: idx
@@ -93,141 +105,36 @@
         - item | trim | length > 0
         - not item.strip().startswith('#')
 
-    - name: Set execution mode to localhost (default)
-      set_fact:
-        inventory_data: "{{ inventory_data | combine({
-          'all': {
-            'children': inventory_data.all.children | combine({
-              'mssql_databases': {
-                'hosts': inventory_data.all.children.mssql_databases.hosts,
-                'vars': inventory_data.all.children.mssql_databases.vars | combine({
-                  'inspec_delegate_host': '',
-                  'inspec_results_dir': '/tmp/inspec_mssql_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'oracle_databases': {
-                'hosts': inventory_data.all.children.oracle_databases.hosts,
-                'vars': inventory_data.all.children.oracle_databases.vars | combine({
-                  'inspec_delegate_host': '',
-                  'inspec_results_dir': '/tmp/inspec_oracle_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'sybase_databases': {
-                'hosts': inventory_data.all.children.sybase_databases.hosts,
-                'vars': inventory_data.all.children.sybase_databases.vars | combine({
-                  'inspec_delegate_host': '',
-                  'inspec_results_dir': '/tmp/inspec_sybase_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'postgres_databases': {
-                'hosts': inventory_data.all.children.postgres_databases.hosts,
-                'vars': inventory_data.all.children.postgres_databases.vars | combine({
-                  'inspec_delegate_host': '',
-                  'inspec_results_dir': '/tmp/inspec_postgres_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              }
-            })
-          }
-        }, recursive=true) }}"
-      when: delegate_host | length == 0
-
-    - name: Add delegate host to inventory (if specified)
-      set_fact:
-        inventory_data: "{{ inventory_data | combine({
-          'all': {
-            'hosts': {
-              delegate_host: {
-                'ansible_host': delegate_address,
-                'ansible_connection': 'ssh',
-                'ansible_user': delegate_user,
-                'ansible_ssh_common_args': '-o StrictHostKeyChecking=accept-new'
-              }
-            },
-            'children': inventory_data.all.children | combine({
-              'mssql_databases': {
-                'hosts': inventory_data.all.children.mssql_databases.hosts,
-                'vars': inventory_data.all.children.mssql_databases.vars | combine({
-                  'inspec_delegate_host': delegate_host,
-                  'inspec_results_dir': '/tmp/inspec_mssql_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'oracle_databases': {
-                'hosts': inventory_data.all.children.oracle_databases.hosts,
-                'vars': inventory_data.all.children.oracle_databases.vars | combine({
-                  'inspec_delegate_host': delegate_host,
-                  'inspec_results_dir': '/tmp/inspec_oracle_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'sybase_databases': {
-                'hosts': inventory_data.all.children.sybase_databases.hosts,
-                'vars': inventory_data.all.children.sybase_databases.vars | combine({
-                  'inspec_delegate_host': delegate_host,
-                  'inspec_results_dir': '/tmp/inspec_sybase_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              },
-              'postgres_databases': {
-                'hosts': inventory_data.all.children.postgres_databases.hosts,
-                'vars': inventory_data.all.children.postgres_databases.vars | combine({
-                  'inspec_delegate_host': delegate_host,
-                  'inspec_results_dir': '/tmp/inspec_postgres_results',
-                  'inspec_debug_mode': false,
-                  'generate_summary_report': true
-                })
-              }
-            })
-          }
-        }, recursive=true) }}"
-      when:
-        - delegate_host | length > 0
-        - delegate_address | length > 0
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_file | dirname }}"
+        state: directory
+        mode: '0755'
+      when: output_file | dirname | length > 0 and output_file | dirname != '.'
 
     - name: Write inventory file
-      copy:
+      ansible.builtin.copy:
+        dest: "{{ output_file }}"
+        mode: '0644'
         content: |
           ---
           # Generated Inventory - Database Compliance Scanning
-          # Credentials injected by AAP2 Custom Credential at runtime
-          #
-          # Execution modes:
-          #   inspec_delegate_host: "" = Run on target host
-          #   inspec_delegate_host: "<hostname>" = Delegate to remote host
-          #
-          # Connection modes (per-host):
-          #   use_winrm: false = Direct database connection (sqlcmd -S)
-          #   use_winrm: true = WinRM to Windows host, then local sqlcmd
-          #   WinRM credentials (winrm_username) injected by AAP2
-          #
+          # BU: {{ target_bu }} | Env: {{ ssc_environment }} | Region: {{ ssc_region }}
+          # Source: {{ input_file }}
           # Generated: {{ ansible_date_time.iso8601 }}
+          # Credentials are injected by AAP2 Custom Credential at runtime.
 
           {{ inventory_data | to_nice_yaml(indent=2) }}
-        dest: "{{ output_file }}"
 
     - name: Summary
-      debug:
+      ansible.builtin.debug:
         msg: |
           Conversion complete: {{ output_file }}
+          - BU group: {{ bu_group }} (env={{ ssc_environment }}, region={{ ssc_region }})
           - MSSQL: {{ platform_counts.mssql }} hosts ({{ winrm_counts.mssql }} WinRM)
           - Oracle: {{ platform_counts.oracle }} hosts
           - Sybase: {{ platform_counts.sybase }} hosts
           - PostgreSQL: {{ platform_counts.postgres }} hosts
           - Total: {{ platform_counts.mssql + platform_counts.oracle + platform_counts.sybase + platform_counts.postgres }} hosts
           - MSSQL Default Connection: {{ mssql_default_connection | upper }}
-          {% if delegate_host | length > 0 %}
-          - Delegate Host: {{ delegate_host }} ({{ delegate_address }})
-          {% else %}
-          - Execution Mode: Localhost (on target host)
-          {% endif %}
+          - Delegate Host: {{ delegate_host if delegate_host | length > 0 else 'none (local execution)' }}
