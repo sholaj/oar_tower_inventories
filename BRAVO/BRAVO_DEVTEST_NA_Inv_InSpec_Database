@@ -1,21 +1,21 @@
 ---
-# UATCORP Business Unit - Database Compliance Scanning Inventory
-# Environment: DEVTEST | Region: NA | BU: UATCORP
+# BRAVO Business Unit - Database Compliance Scanning Inventory
+# Environment: DEVTEST | Region: NA | BU: BRAVO
 
 all:
   children:
-    db_uatcorp:
+    db_bravo:
       vars:
         ssc_sn_environment: test
         ssc_sn_region: na
-        ssc_sn_bu: uatcorp
+        ssc_sn_bu: bravo
         exec_timeout: 600
         ansible_connection: local
         inspec_delegate_host: "[DELEGATE_HOST]"
 
       hosts:
         # MSSQL Servers
-        UATDBSRV01_1433:
+        DBSERVER01_1433:
           database_platform: mssql
           mssql_server: "[DB_SERVER].example.internal"
           mssql_port: 1433
@@ -24,10 +24,10 @@ all:
           mssql_database: master
 
         # Oracle Databases
-        UATORADB01_1521:
+        ORADB01_1521:
           database_platform: oracle
           oracle_server: "[DB_SERVER].example.internal"
           oracle_port: 1521
-          oracle_service: UATDB
+          oracle_service: ORCL
           oracle_version: "19"
           oracle_username: nist_scan_user

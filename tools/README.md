@@ -15,11 +15,11 @@ Example:
 ```yaml
 all:
   children:
-    db_corp:
+    db_alpha:
       vars:
         ssc_sn_environment: test
         ssc_sn_region: na
-        ssc_sn_bu: corp
+        ssc_sn_bu: alpha
         exec_timeout: 600
         ansible_connection: local
         inspec_delegate_host: "[DELEGATE_HOST]"
@@ -38,10 +38,10 @@ all:
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `target_bu` | Business unit identifier (lowercase) | `corp` |
+| `target_bu` | Business unit identifier (lowercase) | `alpha` |
 | `ssc_environment` | `ssc_sn_environment` value | `test`, `prod` |
 | `ssc_region` | `ssc_sn_region` value | `na`, `eu`, `apac` |
-| `inventory_output` | Output path | `CORP/CORP_DEVTEST_NA_Inv_InSpec_Database` |
+| `inventory_output` | Output path | `ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database` |
 
 ## Optional Parameters
 
@@ -74,11 +74,11 @@ PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
 
 ```bash
 ansible-playbook convert_flatfile_to_inventory.yml \
-  -e "target_bu=corp" \
+  -e "target_bu=alpha" \
   -e "ssc_environment=test" \
   -e "ssc_region=na" \
   -e "flatfile_input=databases.txt" \
-  -e "inventory_output=CORP/CORP_DEVTEST_NA_Inv_InSpec_Database"
+  -e "inventory_output=ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database"
 ```
 
 ### MSSQL WinRM (mixed environment)
@@ -87,11 +87,11 @@ Set the platform default and override per-host as needed:
 
 ```bash
 ansible-playbook convert_flatfile_to_inventory.yml \
-  -e "target_bu=corp" \
+  -e "target_bu=alpha" \
   -e "ssc_environment=test" \
   -e "ssc_region=na" \
   -e "flatfile_input=databases.txt" \
-  -e "inventory_output=CORP/CORP_DEVTEST_NA_Inv_InSpec_Database" \
+  -e "inventory_output=ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database" \
   -e "mssql_connection_mode=winrm"
 ```
 
@@ -128,28 +128,28 @@ naming convention.
 ```bash
 # Oracle only
 ansible-playbook convert_cmdb_to_inventory.yml \
-  -e "target_bu=corp" \
+  -e "target_bu=alpha" \
   -e "ssc_environment=test" \
   -e "ssc_region=na" \
   -e "cmdb_oracle_csv=/path/to/oracle_cmdb.csv" \
-  -e "inventory_output=CORP/CORP_DEVTEST_NA_Inv_InSpec_Database"
+  -e "inventory_output=ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database"
 
 # MSSQL only
 ansible-playbook convert_cmdb_to_inventory.yml \
-  -e "target_bu=corp" \
+  -e "target_bu=alpha" \
   -e "ssc_environment=test" \
   -e "ssc_region=na" \
   -e "cmdb_mssql_csv=/path/to/mssql_cmdb.csv" \
-  -e "inventory_output=CORP/CORP_DEVTEST_NA_Inv_InSpec_Database"
+  -e "inventory_output=ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database"
 
 # Both combined
 ansible-playbook convert_cmdb_to_inventory.yml \
-  -e "target_bu=corp" \
+  -e "target_bu=alpha" \
   -e "ssc_environment=test" \
   -e "ssc_region=na" \
   -e "cmdb_oracle_csv=/path/to/oracle_cmdb.csv" \
   -e "cmdb_mssql_csv=/path/to/mssql_cmdb.csv" \
-  -e "inventory_output=CORP/CORP_DEVTEST_NA_Inv_InSpec_Database"
+  -e "inventory_output=ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database"
 ```
 
 ### CMDB Input Columns
@@ -197,11 +197,11 @@ ansible-playbook convert_cmdb_to_inventory.yml \
 ```yaml
 all:
   children:
-    db_corp:
+    db_alpha:
       vars:
         ssc_sn_environment: test
         ssc_sn_region: na
-        ssc_sn_bu: corp
+        ssc_sn_bu: alpha
         exec_timeout: 600
         ansible_connection: local
         inspec_delegate_host: "[DELEGATE_HOST]"

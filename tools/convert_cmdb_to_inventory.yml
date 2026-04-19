@@ -3,7 +3,7 @@
 # Produces host metadata only - credentials handled by AAP2.
 #
 # Required parameters:
-#   target_bu        - Business unit identifier (lowercase, e.g., corp)
+#   target_bu        - Business unit identifier (lowercase, e.g., alpha)
 #   ssc_environment  - Environment label for ssc_sn_environment (e.g., test, prod)
 #   ssc_region       - Region label for ssc_sn_region (e.g., na, eu, apac)
 #   inventory_output - Path to the generated inventory file

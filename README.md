@@ -6,13 +6,17 @@ Ansible Tower / AAP2 inventory files for database compliance scanning, organized
 
 Each business unit has its own directory containing inventory files per environment:
 
+> Business-unit names in this repo use NATO-phonetic codenames as
+> placeholders (`ALPHA`, `BRAVO`, `CHARLIE`, `DELTA`, `ECHO`). Real BU
+> identifiers are intentionally not committed.
+
 ```
 oar_tower_inventories/
-├── CORP/                    # Corp business unit
-├── UATCORP/                 # UAT Corp business unit
-├── IMSWESTUAT/              # IMS West UAT
-├── IMSWESTPROD/             # IMS West Production
-├── CRDIT/                   # Credit business unit
+├── ALPHA/                   # Example BU (placeholder name)
+├── BRAVO/                   # Example BU
+├── CHARLIE/                 # Example BU
+├── DELTA/                   # Example BU
+├── ECHO/                    # Example BU
 └── tools/                   # Inventory management utilities
 ```
 
@@ -30,7 +34,7 @@ oar_tower_inventories/
 {BU}_{ENVIRONMENT}_{REGION}_Inv_InSpec_Database
 ```
 
-Example: `CORP_DEVTEST_NA_Inv_InSpec_Database`
+Example: `ALPHA_DEVTEST_NA_Inv_InSpec_Database`
 
 ## Required Variables
 
@@ -40,16 +44,16 @@ Each inventory group must define:
 |----------|-------------|---------|
 | `ssc_sn_environment` | Environment identifier | `test`, `prod` |
 | `ssc_sn_region` | Region identifier | `na`, `eu`, `apac` |
-| `ssc_sn_bu` | Business unit identifier | `corp`, `uatcorp`, `crdit` |
+| `ssc_sn_bu` | Business unit identifier | `alpha`, `bravo`, `charlie` |
 | `database_platform` | Per-host: database type | `mssql`, `oracle`, `sybase`, `postgres` |
 
 ## Usage
 
 ```bash
-# Scan all databases in CORP BU
-ansible-playbook -i CORP/CORP_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml
+# Scan all databases in the ALPHA BU
+ansible-playbook -i ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml
 
-# Scan only MSSQL databases in CORP BU
-ansible-playbook -i CORP/CORP_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml \
+# Scan only MSSQL databases in the ALPHA BU
+ansible-playbook -i ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml \
   -e "target_platform=mssql"
 ```

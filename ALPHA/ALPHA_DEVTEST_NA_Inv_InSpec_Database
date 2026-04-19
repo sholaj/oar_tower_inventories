@@ -1,17 +1,17 @@
 ---
-# CORP Business Unit - Database Compliance Scanning Inventory
-# Environment: DEVTEST | Region: NA | BU: CORP
+# ALPHA Business Unit - Database Compliance Scanning Inventory
+# Environment: DEVTEST | Region: NA | BU: ALPHA
 #
 # Usage:
-#   ansible-playbook -i CORP/CORP_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml
+#   ansible-playbook -i ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database run_compliance_scans.yml
 
 all:
   children:
-    db_corp:
+    db_alpha:
       vars:
         ssc_sn_environment: test
         ssc_sn_region: na
-        ssc_sn_bu: corp
+        ssc_sn_bu: alpha
         exec_timeout: 600
         ansible_connection: local
         inspec_delegate_host: "[DELEGATE_HOST]"

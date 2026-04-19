@@ -6,7 +6,7 @@
 #   CONNECTION (optional, 7th column): WINRM or DIRECT (default: DIRECT)
 #
 # Required parameters:
-#   target_bu        - Business unit identifier (lowercase, e.g., corp)
+#   target_bu        - Business unit identifier (lowercase, e.g., alpha)
 #   ssc_environment  - Environment label for ssc_sn_environment (e.g., test, prod)
 #   ssc_region       - Region label for ssc_sn_region (e.g., na, eu, apac)
 #   flatfile_input   - Path to the flat-file input
