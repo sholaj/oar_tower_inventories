@@ -20,13 +20,11 @@ oar_tower_inventories/
 └── tools/                   # Inventory management utilities
 ```
 
-## Branch Strategy
+## Branching
 
-| Branch | Environment | Description |
-|--------|-------------|-------------|
-| `main` | All | Default branch with templates |
-| `NA_DEVTEST` | Dev/Test | North America development and test |
-| `NA_PROD` | Production | North America production |
+This repo is single-trunk (`main`). Environment and region are encoded in
+the inventory filename and in the per-group `ssc_sn_environment` /
+`ssc_sn_region` variables — not in branch names.
 
 ## Inventory File Naming
 
@@ -35,6 +33,9 @@ oar_tower_inventories/
 ```
 
 Example: `ALPHA_DEVTEST_NA_Inv_InSpec_Database`
+
+A single BU directory holds one inventory file per environment + region
+combination. AAP2 selects the right file per job template.
 
 ## Required Variables
 
