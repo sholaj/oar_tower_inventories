@@ -209,7 +209,6 @@ all:
         CDB1_EXAMPLEDB1:
           database_platform: oracle
           oracle_server: "[DB_SERVER].example.internal"
-          oracle_database: CDB1
           oracle_service: CDB1
           oracle_port: 1521
           oracle_version: "19c"

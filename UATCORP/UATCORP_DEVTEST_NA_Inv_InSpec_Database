@@ -28,7 +28,6 @@ all:
           database_platform: oracle
           oracle_server: "[DB_SERVER].example.internal"
           oracle_port: 1521
-          oracle_database: UATDB
           oracle_service: UATDB
           oracle_version: "19"
           oracle_username: nist_scan_user

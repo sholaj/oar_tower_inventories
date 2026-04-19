@@ -76,7 +76,6 @@
                         host_id: {
                           'database_platform': 'oracle',
                           'oracle_server': oracle_fqdn,
-                          'oracle_database': oracle_db_name,
                           'oracle_service': oracle_db_name,
                           'oracle_port': 1521,
                           'oracle_version': oracle_mapped_version,

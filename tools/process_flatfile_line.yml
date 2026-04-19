@@ -102,7 +102,6 @@
                     host_id: {
                       'database_platform': 'oracle',
                       'oracle_server': server,
-                      'oracle_database': database,
                       'oracle_service': (service if service != 'null' else database),
                       'oracle_port': port | int,
                       'oracle_version': version,
