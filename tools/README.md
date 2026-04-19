@@ -57,7 +57,7 @@ all:
 ### Input Format
 
 ```
-PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
+PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
 ```
 
 | Field | Required | Description |
@@ -69,6 +69,37 @@ PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
 | PORT | Yes | Database port |
 | VERSION | Yes | Database version |
 | CONNECTION | No | `WINRM` or `DIRECT` (default: `DIRECT`) |
+| MODE_SUFFIX | No | Free-text qualifier appended to `host_id` so the same `server:port` can have multiple inventory entries with distinct ids (e.g. `direct`, `winrm`, `EE`, `DELEGATE_CONNECTION`). When set, `CONNECTION` must also be set (use `DIRECT` as a placeholder). |
+
+#### Multi-mode example (matches the live env naming convention)
+
+```text
+# Same MSSQL server, two scan variants
+MSSQL gdctwvc0007 master svc 1733 2019 DIRECT direct
+MSSQL gdctwvc0007 master svc 1733 2019 WINRM  winrm
+
+# Same Oracle DB, two execution modes
+ORACLE o02dil0 mydb mydb 1528 19 DIRECT EE
+ORACLE o02dil0 mydb mydb 1528 19 DIRECT DELEGATE_CONNECTION
+
+# No suffix — single entry
+SYBASE s01dms0 master master 5000 16
+```
+
+Resulting `host_id` values:
+
+```
+gdctwvc0007_1733_direct
+gdctwvc0007_1733_winrm
+o02dil0_mydb_1528_EE
+o02dil0_mydb_1528_DELEGATE_CONNECTION
+s01dms0_master_5000
+```
+
+The suffix is purely a label — it does **not** auto-set `use_winrm`,
+`inspec_delegate_host`, or any other behaviour-changing variable. The
+caller is responsible for setting those (per-host or via inventory
+group vars).
 
 ### Usage
 

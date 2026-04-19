@@ -2,8 +2,12 @@
 # Flat File to Ansible Inventory Converter (BU-based output)
 # Produces host metadata only - credentials handled by AAP2.
 #
-# Input Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
-#   CONNECTION (optional, 7th column): WINRM or DIRECT (default: DIRECT)
+# Input Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
+#   CONNECTION  (optional, 7th column): WINRM or DIRECT (default: DIRECT)
+#   MODE_SUFFIX (optional, 8th column): free-text qualifier appended to host_id
+#                                        so the same server:port can have multiple
+#                                        inventory entries with distinct ids
+#                                        (e.g. direct, winrm, EE, DELEGATE_CONNECTION)
 #
 # Required parameters:
 #   target_bu        - Business unit identifier (lowercase, e.g., alpha)

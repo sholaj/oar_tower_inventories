@@ -1,7 +1,16 @@
 ---
 # Process single line from flat file (BU-based output)
-# Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION]
-# CONNECTION is optional (7th column): WINRM or DIRECT (default: DIRECT)
+# Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
+# CONNECTION  is optional (7th column): WINRM or DIRECT (default: DIRECT)
+# MODE_SUFFIX is optional (8th column): free-text qualifier appended to host_id
+#                                       so the same server:port can have multiple
+#                                       inventory entries with distinct ids.
+#                                       Common values in the live env:
+#                                         direct, winrm, EE, DELEGATE_CONNECTION
+#                                       When MODE_SUFFIX is provided, CONNECTION
+#                                       must also be provided (use DIRECT as a
+#                                       no-op placeholder when you only want the
+#                                       suffix). Empty/absent → no suffix.
 #
 # Emits a single host into inventory_data.all.children[bu_group].hosts
 # with database_platform set per-host so the multi-platform scan playbook
@@ -13,11 +22,11 @@
 
 - name: Skip lines with wrong field count
   ansible.builtin.debug:
-    msg: "Skipping line {{ idx + 1 }}: expected 6-7 fields, got {{ parts | length }}"
-  when: parts | length < 6 or parts | length > 7
+    msg: "Skipping line {{ idx + 1 }}: expected 6-8 fields, got {{ parts | length }}"
+  when: parts | length < 6 or parts | length > 8
 
 - name: Process valid entry
-  when: parts | length >= 6 and parts | length <= 7
+  when: parts | length >= 6 and parts | length <= 8
   block:
     - name: Extract fields
       ansible.builtin.set_fact:
@@ -29,22 +38,25 @@
         version: "{{ parts[5] }}"
         connection_mode: >-
           {{
-            (parts[6] | upper) if parts | length == 7
+            (parts[6] | upper) if parts | length >= 7
             else (mssql_default_connection | upper) if parts[0] | upper == 'MSSQL'
             else 'DIRECT'
           }}
+        mode_suffix: "{{ parts[7] if parts | length == 8 else '' }}"
 
     - name: Determine WinRM usage
       ansible.builtin.set_fact:
         use_winrm: "{{ connection_mode == 'WINRM' }}"
 
-    - name: Build host_id (MSSQL = server:port; others = server:database:port)
+    - name: Build host_id (MSSQL = server:port; others = server:database:port; +suffix when given)
       ansible.builtin.set_fact:
         host_id: >-
           {{
-            (server.split('.')[0] + '_' + port) | replace('.', '_') | replace('-', '_')
+            ((server.split('.')[0] + '_' + port) | replace('.', '_') | replace('-', '_')
+             + ('_' + mode_suffix if mode_suffix | length > 0 else ''))
             if platform == 'MSSQL'
-            else (server.split('.')[0] + '_' + database + '_' + port) | replace('.', '_') | replace('-', '_')
+            else ((server.split('.')[0] + '_' + database + '_' + port) | replace('.', '_') | replace('-', '_')
+                  + ('_' + mode_suffix if mode_suffix | length > 0 else ''))
           }}
 
     # NOTE: each platform's host-add and counter-bump are merged into a single
