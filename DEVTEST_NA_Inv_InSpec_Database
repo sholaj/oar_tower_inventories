@@ -6,6 +6,12 @@
 # oracle_databases / sybase_databases) own per-BU child groups
 # (db_alpha, db_bravo, ...). BU-scoped vars live on the child group.
 #
+# Delegate hosts live in a separate `delegate_hosts` top-level group
+# (Model B). Each BU's `inspec_delegate_host` group var names the
+# runner it should delegate to -- different BUs may use different
+# runners. When a BU's delegate is shared, multiple BUs simply
+# reference the same name.
+#
 # Playbooks target the technology group, e.g.:
 #   ansible-playbook -i DEVTEST_NA_Inv_InSpec_Database run_mssql_inspec.yml
 #   ansible-playbook -i DEVTEST_NA_Inv_InSpec_Database run_oracle_inspec.yml --limit db_alpha
@@ -16,6 +22,39 @@
 
 all:
   children:
+    # ================================================================
+    # Delegate hosts (InSpec execution targets, reached via SSH)
+    # One per BU -- different BUs may have different runners. Replace
+    # with a shared runner by pointing multiple BUs at the same name.
+    # ================================================================
+    delegate_hosts:
+      hosts:
+        alpha-runner:
+          ansible_host: "[DELEGATE_HOST_ALPHA]"
+          ansible_user: ansible_svc
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+        bravo-runner:
+          ansible_host: "[DELEGATE_HOST_BRAVO]"
+          ansible_user: ansible_svc
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+        charlie-runner:
+          ansible_host: "[DELEGATE_HOST_CHARLIE]"
+          ansible_user: ansible_svc
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+        delta-runner:
+          ansible_host: "[DELEGATE_HOST_DELTA]"
+          ansible_user: ansible_svc
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+        echo-runner:
+          ansible_host: "[DELEGATE_HOST_ECHO]"
+          ansible_user: ansible_svc
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
+
     # ================================================================
     # MSSQL Servers (scanned at server level)
     # ================================================================
@@ -28,7 +67,7 @@ all:
             ssc_sn_bu: alpha
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "alpha-runner"
           hosts:
             ALPHA_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -50,7 +89,7 @@ all:
             ssc_sn_bu: bravo
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "bravo-runner"
           hosts:
             BRAVO_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -66,7 +105,7 @@ all:
             ssc_sn_bu: charlie
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "charlie-runner"
           hosts:
             CHARLIE_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -82,7 +121,7 @@ all:
             ssc_sn_bu: delta
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "delta-runner"
           hosts:
             DELTA_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -98,7 +137,7 @@ all:
             ssc_sn_bu: echo
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "echo-runner"
           hosts:
             ECHO_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -119,7 +158,7 @@ all:
             ssc_sn_bu: alpha
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "alpha-runner"
           hosts:
             ALPHA_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -135,7 +174,7 @@ all:
             ssc_sn_bu: bravo
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "bravo-runner"
           hosts:
             BRAVO_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -151,7 +190,7 @@ all:
             ssc_sn_bu: charlie
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "charlie-runner"
           hosts:
             CHARLIE_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -167,7 +206,7 @@ all:
             ssc_sn_bu: delta
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "delta-runner"
           hosts:
             DELTA_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -188,7 +227,7 @@ all:
             ssc_sn_bu: alpha
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "alpha-runner"
           hosts:
             ALPHA_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"
@@ -205,7 +244,7 @@ all:
             ssc_sn_bu: delta
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "delta-runner"
           hosts:
             DELTA_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"
@@ -222,7 +261,7 @@ all:
             ssc_sn_bu: echo
             exec_timeout: 600
             ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+            inspec_delegate_host: "echo-runner"
           hosts:
             ECHO_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"
