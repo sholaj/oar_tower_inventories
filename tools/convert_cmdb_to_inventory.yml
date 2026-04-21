@@ -71,11 +71,15 @@
         - oracle_csv_file | length == 0
         - mssql_csv_file | length == 0
 
-    - name: Initialize BU group (templated key)
+    - name: Initialize tech groups with single-BU child (templated keys)
       ansible.builtin.set_fact:
         inventory_data:
           all:
-            children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+            children:
+              mssql_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+              oracle_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
       vars:
         bu_vars:
           ssc_sn_environment: "{{ ssc_environment }}"

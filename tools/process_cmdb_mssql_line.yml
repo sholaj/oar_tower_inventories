@@ -59,18 +59,18 @@
         - name: Log duplicate MSSQL server
           ansible.builtin.debug:
             msg: "Duplicate MSSQL: {{ mssql_fqdn }}:{{ mssql_port }} (instance {{ mssql_instance_name }})"
-          when: host_id in inventory_data.all.children[bu_group].hosts
+          when: host_id in inventory_data.all.children.mssql_databases.children[bu_group].hosts
 
         - name: Detect connection warnings (new MSSQL hosts only)
           ansible.builtin.set_fact:
             has_connection_warning: "{{ ('unable to connect' in (comments | lower)) or ('unable to validate' in (comments | lower)) }}"
-          when: host_id not in inventory_data.all.children[bu_group].hosts
+          when: host_id not in inventory_data.all.children.mssql_databases.children[bu_group].hosts
 
         - name: Append MSSQL warning to diagnostics list
           ansible.builtin.set_fact:
             connection_warnings: "{{ connection_warnings + [{'platform': 'mssql', 'host': raw_name, 'comment': comments}] }}"
           when:
-            - host_id not in inventory_data.all.children[bu_group].hosts
+            - host_id not in inventory_data.all.children.mssql_databases.children[bu_group].hosts
             - has_connection_warning | bool
 
         # NOTE: host-add and counter-bump are merged into one set_fact. With a
@@ -78,24 +78,27 @@
         # skip because Ansible re-evaluates the block when per task and the
         # host has just been added.
         - name: Add new MSSQL host (server-level dedup)
-          when: host_id not in inventory_data.all.children[bu_group].hosts
+          when: host_id not in inventory_data.all.children.mssql_databases.children[bu_group].hosts
           ansible.builtin.set_fact:
             inventory_data: >-
               {{ inventory_data | combine({
                 'all': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                        host_id: {
-                          'database_platform': 'mssql',
-                          'mssql_server': mssql_fqdn,
-                          'mssql_port': mssql_port | int,
-                          'mssql_version': version_name,
-                          'mssql_instance': mssql_instance_name,
-                          'mssql_database': 'master',
-                          'mssql_username': 'nist_scan_user'
+                    'mssql_databases': {
+                      'children': {
+                        bu_group: {
+                          'hosts': inventory_data.all.children.mssql_databases.children[bu_group].hosts | combine({
+                            host_id: {
+                              'mssql_server': mssql_fqdn,
+                              'mssql_port': mssql_port | int,
+                              'mssql_version': version_name,
+                              'mssql_instance': mssql_instance_name,
+                              'mssql_database': 'master',
+                              'mssql_username': 'nist_scan_user'
+                            }
+                          })
                         }
-                      })
+                      }
                     }
                   }
                 }

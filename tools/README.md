@@ -1,38 +1,61 @@
-# Inventory Converters (BU-based output)
+# Inventory Converters (tech-group + BU sub-group output)
 
 Convert database source data (flat files or CMDB CSV exports) into the
-**business-unit-based** Ansible inventory format used by the
-`oar_tower_inventories` repo and consumed by `linux-inspec` scan playbooks.
+Ansible inventory format used by the `oar_tower_inventories` repo and
+consumed by `linux-inspec` scan playbooks.
 
 ## Output Format
 
-All converters emit a single `db_<bu>` group with `ssc_sn_*` group vars and
-**`database_platform` per host** (the field the multi-platform scan playbook
-uses to dispatch to the correct role: `mssql`, `oracle`, `sybase`, `postgres`).
+Each converter run produces a **single-BU fragment** laid out as
+technology groups (`mssql_databases`, `oracle_databases`, etc.) with
+the BU as a child group (`db_<bu>`) owning the BU-scoped vars. The
+platform is implicit from the parent group — **no `database_platform`
+var on individual hosts**.
 
 Example:
 
 ```yaml
 all:
   children:
-    db_alpha:
-      vars:
-        ssc_sn_environment: test
-        ssc_sn_region: na
-        ssc_sn_bu: alpha
-        exec_timeout: 600
-        ansible_connection: local
-        inspec_delegate_host: "[DELEGATE_HOST]"
-      hosts:
-        DBSERVER01_1433:
-          database_platform: mssql
-          mssql_server: "[DB_SERVER].example.internal"
-          mssql_port: 1433
-          mssql_version: "2019"
-          mssql_database: master
-          mssql_username: nist_scan_user
-          use_winrm: false
+    mssql_databases:
+      children:
+        db_alpha:
+          vars:
+            ssc_sn_environment: test
+            ssc_sn_region: na
+            ssc_sn_bu: alpha
+            exec_timeout: 600
+            ansible_connection: local
+            inspec_delegate_host: "[DELEGATE_HOST]"
+          hosts:
+            DBSERVER01_1433:
+              mssql_server: "[DB_SERVER].example.internal"
+              mssql_port: 1433
+              mssql_version: "2019"
+              mssql_database: master
+              mssql_username: nist_scan_user
+              use_winrm: false
+    oracle_databases:
+      children:
+        db_alpha:
+          vars:
+            # same BU vars as above
+          hosts:
+            ORADB01_1521:
+              oracle_server: "[DB_SERVER].example.internal"
+              oracle_port: 1521
+              oracle_service: ORCL
+              oracle_version: "19"
+              oracle_username: nist_scan_user
 ```
+
+## Single-BU fragment → env inventory
+
+For an env-level file containing corp + affiliates, run the converter
+once per BU and merge the fragments into a single file like
+`DEVTEST_NA_Inv_InSpec_Database` in the repo root. The tech groups
+(`mssql_databases`, ...) stay the same; only the `children` block
+grows with additional `db_<bu>` entries.
 
 ## Required Parameters (both converters)
 
@@ -41,7 +64,7 @@ all:
 | `target_bu` | Business unit identifier (lowercase) | `alpha` |
 | `ssc_environment` | `ssc_sn_environment` value | `test`, `prod` |
 | `ssc_region` | `ssc_sn_region` value | `na`, `eu`, `apac` |
-| `inventory_output` | Output path | `ALPHA/ALPHA_DEVTEST_NA_Inv_InSpec_Database` |
+| `inventory_output` | Output path | `fragments/alpha_devtest_na.yml` |
 
 ## Optional Parameters
 
@@ -228,31 +251,36 @@ ansible-playbook convert_cmdb_to_inventory.yml \
 ```yaml
 all:
   children:
-    db_alpha:
-      vars:
-        ssc_sn_environment: test
-        ssc_sn_region: na
-        ssc_sn_bu: alpha
-        exec_timeout: 600
-        ansible_connection: local
-        inspec_delegate_host: "[DELEGATE_HOST]"
-      hosts:
-        CDB1_EXAMPLEDB1:
-          database_platform: oracle
-          oracle_server: "[DB_SERVER].example.internal"
-          oracle_service: CDB1
-          oracle_port: 1521
-          oracle_version: "19c"
-          oracle_username: nist_scan_user
+    oracle_databases:
+      children:
+        db_alpha:
+          vars:
+            ssc_sn_environment: test
+            ssc_sn_region: na
+            ssc_sn_bu: alpha
+            exec_timeout: 600
+            ansible_connection: local
+            inspec_delegate_host: "[DELEGATE_HOST]"
+          hosts:
+            CDB1_EXAMPLEDB1:
+              oracle_server: "[DB_SERVER].example.internal"
+              oracle_service: CDB1
+              oracle_port: 1521
+              oracle_version: "19c"
+              oracle_username: nist_scan_user
 
-        EXAMPLEHOST_1433:
-          database_platform: mssql
-          mssql_server: "[DB_SERVER].example.internal"
-          mssql_port: 1433
-          mssql_version: "2019"
-          mssql_instance: MSSQLSERVER
-          mssql_database: master
-          mssql_username: nist_scan_user
+    mssql_databases:
+      children:
+        db_alpha:
+          vars: { }   # same BU vars
+          hosts:
+            EXAMPLEHOST_1433:
+              mssql_server: "[DB_SERVER].example.internal"
+              mssql_port: 1433
+              mssql_version: "2019"
+              mssql_instance: MSSQLSERVER
+              mssql_database: master
+              mssql_username: nist_scan_user
 ```
 
 ---
@@ -275,6 +303,6 @@ control of placement.
   is never committed to git.
 - Credentials (passwords) are injected by AAP2 Custom Credential at runtime;
   inventories carry usernames only.
-- The `db_<bu>` group + per-host `database_platform` is the contract the
-  multi-platform scan playbook (`run_compliance_scans.yml`) relies on to
-  dispatch to the correct role.
+- The contract each single-platform playbook relies on is simply
+  `hosts: <plat>_databases` (e.g. `mssql_databases`). The BU child
+  group (`db_<bu>`) lets you `--limit db_alpha` to scope to one BU.

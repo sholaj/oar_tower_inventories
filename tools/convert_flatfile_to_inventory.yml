@@ -1,5 +1,5 @@
 ---
-# Flat File to Ansible Inventory Converter (BU-based output)
+# Flat File to Ansible Inventory Converter (tech-group output, BU sub-group)
 # Produces host metadata only - credentials handled by AAP2.
 #
 # Input Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
@@ -8,6 +8,19 @@
 #                                        so the same server:port can have multiple
 #                                        inventory entries with distinct ids
 #                                        (e.g. direct, winrm, EE, DELEGATE_CONNECTION)
+#
+# Output layout (single-BU fragment):
+#
+#   all:
+#     children:
+#       mssql_databases:      { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
+#       oracle_databases:     { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
+#       sybase_databases:     { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
+#       postgres_databases:   { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
+#
+# Run once per BU. Combine multiple single-BU outputs into a single env-level
+# file by hand (or via a simple YAML merge) to produce the final
+# DEVTEST_NA_Inv_InSpec_Database that ships to AAP.
 #
 # Required parameters:
 #   target_bu        - Business unit identifier (lowercase, e.g., alpha)
@@ -22,7 +35,7 @@
 #   sybase_ssh_user_default - Default SSH user for Sybase scans (default: sybase_admin)
 #   exec_timeout            - Per-host scan timeout seconds (default: 600)
 
-- name: Convert Flat File to BU-based Inventory
+- name: Convert Flat File to tech-group + BU Inventory
   hosts: localhost
   gather_facts: true
   vars:
@@ -36,8 +49,8 @@
     sybase_ssh_user_value: "{{ sybase_ssh_user_default | default('sybase_admin') }}"
     exec_timeout_value: "{{ exec_timeout | default(600) }}"
 
-    # NOTE: dict keys are not templated in `vars:`; the BU group is built
-    # in pre_tasks via set_fact so the key resolves correctly at runtime.
+    # NOTE: dict keys are not templated in `vars:`; the tech+BU scaffold is
+    # built in pre_tasks via set_fact so the bu_group key resolves at runtime.
     inventory_data:
       all:
         children: {}
@@ -65,11 +78,19 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: Initialize BU group (templated key)
+    - name: Initialize tech groups with single-BU child (templated keys)
       ansible.builtin.set_fact:
         inventory_data:
           all:
-            children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+            children:
+              mssql_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+              oracle_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+              sybase_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+              postgres_databases:
+                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
       vars:
         bu_vars:
           ssc_sn_environment: "{{ ssc_environment }}"

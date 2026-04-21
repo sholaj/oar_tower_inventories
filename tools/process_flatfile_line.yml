@@ -1,20 +1,15 @@
 ---
-# Process single line from flat file (BU-based output)
+# Process single line from flat file (tech-group + BU output)
 # Format: PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
 # CONNECTION  is optional (7th column): WINRM or DIRECT (default: DIRECT)
-# MODE_SUFFIX is optional (8th column): free-text qualifier appended to host_id
-#                                       so the same server:port can have multiple
-#                                       inventory entries with distinct ids.
-#                                       Common values in the live env:
-#                                         direct, winrm, EE, DELEGATE_CONNECTION
-#                                       When MODE_SUFFIX is provided, CONNECTION
-#                                       must also be provided (use DIRECT as a
-#                                       no-op placeholder when you only want the
-#                                       suffix). Empty/absent → no suffix.
+# MODE_SUFFIX is optional (8th column): free-text suffix appended to host_id
 #
-# Emits a single host into inventory_data.all.children[bu_group].hosts
-# with database_platform set per-host so the multi-platform scan playbook
-# can dispatch to the correct role.
+# Emits a single host into:
+#   inventory_data.all.children[<plat>_databases].children[bu_group].hosts
+#
+# No per-host database_platform var is emitted -- the platform is implicit
+# from the parent group (e.g. mssql_databases), consumed by the matching
+# single-platform playbook.
 
 - name: Parse line
   ansible.builtin.set_fact:
@@ -59,34 +54,36 @@
                   + ('_' + mode_suffix if mode_suffix | length > 0 else ''))
           }}
 
-    # NOTE: each platform's host-add and counter-bump are merged into a single
-    # set_fact. Splitting them across two tasks under a shared `when:` block
-    # causes the second task to skip — the block-level `when` is re-evaluated
-    # per task, and the dedup condition flips to false after task 1 mutates
-    # inventory_data.
+    # NOTE: host-add and counter-bump are merged into a single set_fact per
+    # platform. Splitting across tasks under a shared block `when:` causes
+    # the second task to skip because the block's when is re-evaluated per
+    # task and the dedup condition flips to false after task 1 mutates state.
 
-    # ---------- MSSQL (server-level dedup) ----------
+    # ---------- MSSQL (server-level dedup within the BU child of mssql_databases) ----------
     - name: Add MSSQL host
       when:
         - platform == 'MSSQL'
-        - host_id not in inventory_data.all.children[bu_group].hosts
+        - host_id not in inventory_data.all.children.mssql_databases.children[bu_group].hosts
       ansible.builtin.set_fact:
         inventory_data: >-
           {{ inventory_data | combine({
             'all': {
               'children': {
-                bu_group: {
-                  'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                    host_id: {
-                      'database_platform': 'mssql',
-                      'mssql_server': server,
-                      'mssql_port': port | int,
-                      'mssql_version': version,
-                      'mssql_database': 'master',
-                      'mssql_username': 'nist_scan_user',
-                      'use_winrm': use_winrm
+                'mssql_databases': {
+                  'children': {
+                    bu_group: {
+                      'hosts': inventory_data.all.children.mssql_databases.children[bu_group].hosts | combine({
+                        host_id: {
+                          'mssql_server': server,
+                          'mssql_port': port | int,
+                          'mssql_version': version,
+                          'mssql_database': 'master',
+                          'mssql_username': 'nist_scan_user',
+                          'use_winrm': use_winrm
+                        }
+                      })
                     }
-                  })
+                  }
                 }
               }
             }
@@ -99,7 +96,7 @@
         msg: "Duplicate MSSQL: {{ server }}:{{ port }}"
       when:
         - platform == 'MSSQL'
-        - host_id in inventory_data.all.children[bu_group].hosts
+        - host_id in inventory_data.all.children.mssql_databases.children[bu_group].hosts
 
     # ---------- Oracle (per-database) ----------
     - name: Add Oracle host
@@ -109,17 +106,20 @@
           {{ inventory_data | combine({
             'all': {
               'children': {
-                bu_group: {
-                  'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                    host_id: {
-                      'database_platform': 'oracle',
-                      'oracle_server': server,
-                      'oracle_service': (service if service != 'null' else database),
-                      'oracle_port': port | int,
-                      'oracle_version': version,
-                      'oracle_username': 'nist_scan_user'
+                'oracle_databases': {
+                  'children': {
+                    bu_group: {
+                      'hosts': inventory_data.all.children.oracle_databases.children[bu_group].hosts | combine({
+                        host_id: {
+                          'oracle_server': server,
+                          'oracle_service': (service if service != 'null' else database),
+                          'oracle_port': port | int,
+                          'oracle_version': version,
+                          'oracle_username': 'nist_scan_user'
+                        }
+                      })
                     }
-                  })
+                  }
                 }
               }
             }
@@ -134,20 +134,23 @@
           {{ inventory_data | combine({
             'all': {
               'children': {
-                bu_group: {
-                  'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                    host_id: {
-                      'database_platform': 'sybase',
-                      'sybase_server': server,
-                      'sybase_database': database,
-                      'sybase_service': (service if service != 'null' else database),
-                      'sybase_port': port | int,
-                      'sybase_version': version,
-                      'sybase_username': 'nist_scan_user',
-                      'sybase_use_ssh': true,
-                      'sybase_ssh_user': sybase_ssh_user_value
+                'sybase_databases': {
+                  'children': {
+                    bu_group: {
+                      'hosts': inventory_data.all.children.sybase_databases.children[bu_group].hosts | combine({
+                        host_id: {
+                          'sybase_server': server,
+                          'sybase_database': database,
+                          'sybase_service': (service if service != 'null' else database),
+                          'sybase_port': port | int,
+                          'sybase_version': version,
+                          'sybase_username': 'nist_scan_user',
+                          'sybase_use_ssh': true,
+                          'sybase_ssh_user': sybase_ssh_user_value
+                        }
+                      })
                     }
-                  })
+                  }
                 }
               }
             }
@@ -162,18 +165,21 @@
           {{ inventory_data | combine({
             'all': {
               'children': {
-                bu_group: {
-                  'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                    host_id: {
-                      'database_platform': 'postgres',
-                      'postgres_server': server,
-                      'postgres_database': database,
-                      'postgres_service': (service if service != 'null' else ''),
-                      'postgres_port': port | int,
-                      'postgres_version': version,
-                      'postgres_username': 'nist_scan_user'
+                'postgres_databases': {
+                  'children': {
+                    bu_group: {
+                      'hosts': inventory_data.all.children.postgres_databases.children[bu_group].hosts | combine({
+                        host_id: {
+                          'postgres_server': server,
+                          'postgres_database': database,
+                          'postgres_service': (service if service != 'null' else ''),
+                          'postgres_port': port | int,
+                          'postgres_version': version,
+                          'postgres_username': 'nist_scan_user'
+                        }
+                      })
                     }
-                  })
+                  }
                 }
               }
             }

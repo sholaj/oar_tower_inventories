@@ -1,7 +1,9 @@
 ---
 # Process single Oracle CMDB row (DictReader output, called from convert_cmdb_to_inventory.yml).
 # Expected dict keys: Name (DATABASE@SERVER.DOMAIN), Version, Validation Status, Comments
-# Emits one host into inventory_data.all.children[bu_group].hosts with database_platform=oracle.
+# Emits one host into
+#   inventory_data.all.children.oracle_databases.children[bu_group].hosts
+# No per-host database_platform var -- platform is implicit from the parent group.
 # Connection warnings are NOT written to the inventory; they are appended to
 # connection_warnings (sidecar diagnostics) instead.
 
@@ -71,17 +73,20 @@
               {{ inventory_data | combine({
                 'all': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children[bu_group].hosts | combine({
-                        host_id: {
-                          'database_platform': 'oracle',
-                          'oracle_server': oracle_fqdn,
-                          'oracle_service': oracle_db_name,
-                          'oracle_port': 1521,
-                          'oracle_version': oracle_mapped_version,
-                          'oracle_username': 'nist_scan_user'
+                    'oracle_databases': {
+                      'children': {
+                        bu_group: {
+                          'hosts': inventory_data.all.children.oracle_databases.children[bu_group].hosts | combine({
+                            host_id: {
+                              'oracle_server': oracle_fqdn,
+                              'oracle_service': oracle_db_name,
+                              'oracle_port': 1521,
+                              'oracle_version': oracle_mapped_version,
+                              'oracle_username': 'nist_scan_user'
+                            }
+                          })
                         }
-                      })
+                      }
                     }
                   }
                 }
