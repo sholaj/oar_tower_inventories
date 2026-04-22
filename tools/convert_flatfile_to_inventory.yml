@@ -13,10 +13,19 @@
 #
 #   all:
 #     children:
-#       mssql_databases:      { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
-#       oracle_databases:     { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
-#       sybase_databases:     { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
-#       postgres_databases:   { children: { db_<bu>: { vars: {...}, hosts: {...} } } }
+#       db_<bu>:
+#         vars: { ssc_sn_bu, inspec_delegate_host, ... }
+#         children: { db_<bu>_mssql, db_<bu>_oracle, db_<bu>_sybase, db_<bu>_postgres }
+#       mssql_databases:      { children: { db_<bu>_mssql:    { hosts: {...} } } }
+#       oracle_databases:     { children: { db_<bu>_oracle:   { hosts: {...} } } }
+#       sybase_databases:     { children: { db_<bu>_sybase:   { hosts: {...} } } }
+#       postgres_databases:   { children: { db_<bu>_postgres: { hosts: {...} } } }
+#
+# The db_<bu> aggregator exists so `--limit db_<bu>` targets every
+# platform for a BU. Subgroup names must be unique per platform to
+# avoid Ansible's group-name-is-global collision (a repeated plain
+# `db_<bu>` under multiple tech groups merges every host list into
+# one group).
 #
 # Run once per BU. Combine multiple single-BU outputs into a single env-level
 # file by hand (or via a simple YAML merge) to produce the final
@@ -42,7 +51,15 @@
     input_file: "{{ flatfile_input }}"
     output_file: "{{ inventory_output }}"
 
+    # Aggregator group (holds BU-wide vars) and platform-specific
+    # subgroups. Subgroup names must be unique across tech groups to
+    # avoid Ansible's group-name-is-global collision (see
+    # DEVTEST_NA_Inv_InSpec_Database header for the rationale).
     bu_group: "db_{{ target_bu }}"
+    bu_mssql_group: "db_{{ target_bu }}_mssql"
+    bu_oracle_group: "db_{{ target_bu }}_oracle"
+    bu_sybase_group: "db_{{ target_bu }}_sybase"
+    bu_postgres_group: "db_{{ target_bu }}_postgres"
 
     delegate_host: "{{ inspec_delegate_host | default('') }}"
     mssql_default_connection: "{{ mssql_connection_mode | default('direct') }}"
@@ -78,19 +95,33 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: Initialize tech groups with single-BU child (templated keys)
+    - name: Initialize aggregator + platform-specific BU subgroups (templated keys)
       ansible.builtin.set_fact:
         inventory_data:
           all:
-            children:
-              mssql_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
-              oracle_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
-              sybase_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
-              postgres_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+            children: "{{ {
+              bu_group: {
+                'vars': bu_vars,
+                'children': {
+                  bu_mssql_group: {},
+                  bu_oracle_group: {},
+                  bu_sybase_group: {},
+                  bu_postgres_group: {}
+                }
+              },
+              'mssql_databases': {
+                'children': {bu_mssql_group: {'hosts': {}}}
+              },
+              'oracle_databases': {
+                'children': {bu_oracle_group: {'hosts': {}}}
+              },
+              'sybase_databases': {
+                'children': {bu_sybase_group: {'hosts': {}}}
+              },
+              'postgres_databases': {
+                'children': {bu_postgres_group: {'hosts': {}}}
+              }
+            } }}"
       vars:
         bu_vars:
           ssc_sn_environment: "{{ ssc_environment }}"
@@ -155,7 +186,8 @@
       ansible.builtin.debug:
         msg: |
           Conversion complete: {{ output_file }}
-          - BU group: {{ bu_group }} (env={{ ssc_environment }}, region={{ ssc_region }})
+          - BU aggregator: {{ bu_group }} (env={{ ssc_environment }}, region={{ ssc_region }})
+          - Subgroups: {{ bu_mssql_group }}, {{ bu_oracle_group }}, {{ bu_sybase_group }}, {{ bu_postgres_group }}
           - MSSQL: {{ platform_counts.mssql }} hosts ({{ winrm_counts.mssql }} WinRM)
           - Oracle: {{ platform_counts.oracle }} hosts
           - Sybase: {{ platform_counts.sybase }} hosts
