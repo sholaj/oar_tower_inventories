@@ -3,18 +3,36 @@
 # Environment: DEVTEST | Region: NA
 #
 # Single env-level inventory. Technology groups (mssql_databases /
-# oracle_databases / sybase_databases) own per-BU child groups
-# (db_alpha, db_bravo, ...). BU-scoped vars live on the child group.
+# oracle_databases / sybase_databases / postgres_databases) own
+# PLATFORM-SPECIFIC per-BU child groups:
 #
-# Delegate hosts live in a separate `delegate_hosts` top-level group
-# (Model B). Each BU's `inspec_delegate_host` group var names the
-# runner it should delegate to -- different BUs may use different
-# runners. When a BU's delegate is shared, multiple BUs simply
-# reference the same name.
+#     mssql_databases.children  -> db_<bu>_mssql
+#     oracle_databases.children -> db_<bu>_oracle
+#     sybase_databases.children -> db_<bu>_sybase
+#
+# A top-level db_<bu> group aggregates the per-platform subgroups so
+# `--limit db_<bu>` still targets every host in a BU across platforms.
+# BU-scoped vars (ssc_sn_environment, ssc_sn_region, ssc_sn_bu,
+# inspec_delegate_host) live on the aggregator.
+#
+# WHY NOT a single `db_<bu>` group as a direct child of all three tech
+# groups (as in the old layout): Ansible inventory YAML treats group
+# names as global keys. Repeating `db_<bu>` under multiple tech groups
+# merges every host list into one group that then becomes a child of
+# every tech group, polluting `mssql_databases` with Oracle/Sybase
+# hosts (and vice versa). Platform-specific subgroup names avoid the
+# collision.
+#
+# Delegate hosts live in a separate top-level `delegate_hosts` group
+# (Model B). Each BU's `inspec_delegate_host` names the runner it
+# delegates to — different BUs may use different runners; shared
+# runners are referenced by name from multiple BUs.
 #
 # Playbooks target the technology group, e.g.:
 #   ansible-playbook -i DEVTEST_NA_Inv_InSpec_Database run_mssql_inspec.yml
 #   ansible-playbook -i DEVTEST_NA_Inv_InSpec_Database run_oracle_inspec.yml --limit db_alpha
+#     (--limit db_alpha hits the aggregator; combined with
+#      hosts: oracle_databases it reduces to db_alpha_oracle hosts)
 #
 # BU directory names in this public mirror use NATO-phonetic
 # placeholders (alpha/bravo/charlie/delta/echo). Real BU identifiers
@@ -24,7 +42,7 @@ all:
   children:
     # ================================================================
     # Delegate hosts (InSpec execution targets, reached via SSH)
-    # One per BU -- different BUs may have different runners. Replace
+    # One per BU — different BUs may have different runners. Replace
     # with a shared runner by pointing multiple BUs at the same name.
     # ================================================================
     delegate_hosts:
@@ -56,18 +74,77 @@ all:
           ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"
 
     # ================================================================
+    # BU aggregator groups (top-level) — hold BU-wide vars, aggregate
+    # the per-platform subgroups so `--limit db_<bu>` still works.
+    # ================================================================
+    db_alpha:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: alpha
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "alpha-runner"
+      children:
+        db_alpha_mssql:
+        db_alpha_oracle:
+        db_alpha_sybase:
+
+    db_bravo:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: bravo
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "bravo-runner"
+      children:
+        db_bravo_mssql:
+        db_bravo_oracle:
+
+    db_charlie:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: charlie
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "charlie-runner"
+      children:
+        db_charlie_mssql:
+        db_charlie_oracle:
+
+    db_delta:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: delta
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "delta-runner"
+      children:
+        db_delta_mssql:
+        db_delta_oracle:
+        db_delta_sybase:
+
+    db_echo:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: echo
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "echo-runner"
+      children:
+        db_echo_mssql:
+        db_echo_sybase:
+
+    # ================================================================
     # MSSQL Servers (scanned at server level)
     # ================================================================
     mssql_databases:
       children:
-        db_alpha:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: alpha
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "alpha-runner"
+        db_alpha_mssql:
           hosts:
             ALPHA_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -82,14 +159,7 @@ all:
               mssql_username: nist_scan_user
               mssql_database: master
 
-        db_bravo:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: bravo
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "bravo-runner"
+        db_bravo_mssql:
           hosts:
             BRAVO_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -98,14 +168,7 @@ all:
               mssql_username: nist_scan_user
               mssql_database: master
 
-        db_charlie:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: charlie
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "charlie-runner"
+        db_charlie_mssql:
           hosts:
             CHARLIE_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -114,14 +177,7 @@ all:
               mssql_username: nist_scan_user
               mssql_database: master
 
-        db_delta:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: delta
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "delta-runner"
+        db_delta_mssql:
           hosts:
             DELTA_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -130,14 +186,7 @@ all:
               mssql_username: nist_scan_user
               mssql_database: master
 
-        db_echo:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: echo
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "echo-runner"
+        db_echo_mssql:
           hosts:
             ECHO_DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -151,14 +200,7 @@ all:
     # ================================================================
     oracle_databases:
       children:
-        db_alpha:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: alpha
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "alpha-runner"
+        db_alpha_oracle:
           hosts:
             ALPHA_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -167,14 +209,7 @@ all:
               oracle_version: "19"
               oracle_username: nist_scan_user
 
-        db_bravo:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: bravo
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "bravo-runner"
+        db_bravo_oracle:
           hosts:
             BRAVO_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -183,14 +218,7 @@ all:
               oracle_version: "19"
               oracle_username: nist_scan_user
 
-        db_charlie:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: charlie
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "charlie-runner"
+        db_charlie_oracle:
           hosts:
             CHARLIE_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -199,14 +227,7 @@ all:
               oracle_version: "12"
               oracle_username: nist_scan_user
 
-        db_delta:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: delta
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "delta-runner"
+        db_delta_oracle:
           hosts:
             DELTA_ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -220,14 +241,7 @@ all:
     # ================================================================
     sybase_databases:
       children:
-        db_alpha:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: alpha
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "alpha-runner"
+        db_alpha_sybase:
           hosts:
             ALPHA_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"
@@ -237,14 +251,7 @@ all:
               sybase_username: nist_scan_user
               sybase_database: master
 
-        db_delta:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: delta
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "delta-runner"
+        db_delta_sybase:
           hosts:
             DELTA_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"
@@ -254,14 +261,7 @@ all:
               sybase_username: nist_scan_user
               sybase_database: master
 
-        db_echo:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: echo
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "echo-runner"
+        db_echo_sybase:
           hosts:
             ECHO_SYBDB01_5000:
               sybase_server: "[DB_SERVER].example.internal"

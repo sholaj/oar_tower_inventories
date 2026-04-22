@@ -31,7 +31,13 @@
     output_file: "{{ inventory_output }}"
     diagnostics_file: "{{ inventory_output }}.diagnostics.yml"
 
+    # Aggregator group (holds BU-wide vars) and platform-specific
+    # subgroups. Subgroup names must be unique across tech groups to
+    # avoid Ansible's group-name-is-global collision (see
+    # DEVTEST_NA_Inv_InSpec_Database header for the rationale).
     bu_group: "db_{{ target_bu }}"
+    bu_oracle_group: "db_{{ target_bu }}_oracle"
+    bu_mssql_group: "db_{{ target_bu }}_mssql"
     delegate_host: "{{ inspec_delegate_host | default('') }}"
     exec_timeout_value: "{{ exec_timeout | default(600) }}"
 
@@ -71,15 +77,25 @@
         - oracle_csv_file | length == 0
         - mssql_csv_file | length == 0
 
-    - name: Initialize tech groups with single-BU child (templated keys)
+    - name: Initialize aggregator + platform-specific BU subgroups (templated keys)
       ansible.builtin.set_fact:
         inventory_data:
           all:
-            children:
-              mssql_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
-              oracle_databases:
-                children: "{{ {bu_group: {'vars': bu_vars, 'hosts': {}}} }}"
+            children: "{{ {
+              bu_group: {
+                'vars': bu_vars,
+                'children': {
+                  bu_mssql_group: {},
+                  bu_oracle_group: {}
+                }
+              },
+              'mssql_databases': {
+                'children': {bu_mssql_group: {'hosts': {}}}
+              },
+              'oracle_databases': {
+                'children': {bu_oracle_group: {'hosts': {}}}
+              }
+            } }}"
       vars:
         bu_vars:
           ssc_sn_environment: "{{ ssc_environment }}"
@@ -231,7 +247,8 @@
       ansible.builtin.debug:
         msg: |
           Conversion complete: {{ output_file }}
-          - BU group: {{ bu_group }} (env={{ ssc_environment }}, region={{ ssc_region }})
+          - BU aggregator: {{ bu_group }} (env={{ ssc_environment }}, region={{ ssc_region }})
+          - Subgroups: {{ bu_mssql_group }}, {{ bu_oracle_group }}
           - Oracle: {{ platform_counts.oracle }} hosts ({{ skipped_counts.oracle }} skipped)
           - MSSQL:  {{ platform_counts.mssql }} hosts ({{ skipped_counts.mssql }} skipped)
           - Total:  {{ platform_counts.oracle + platform_counts.mssql }} hosts

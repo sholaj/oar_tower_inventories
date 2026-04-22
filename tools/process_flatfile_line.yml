@@ -63,7 +63,7 @@
     - name: Add MSSQL host
       when:
         - platform == 'MSSQL'
-        - host_id not in inventory_data.all.children.mssql_databases.children[bu_group].hosts
+        - host_id not in inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts
       ansible.builtin.set_fact:
         inventory_data: >-
           {{ inventory_data | combine({
@@ -71,8 +71,8 @@
               'children': {
                 'mssql_databases': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children.mssql_databases.children[bu_group].hosts | combine({
+                    bu_mssql_group: {
+                      'hosts': inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts | combine({
                         host_id: {
                           'mssql_server': server,
                           'mssql_port': port | int,
@@ -96,7 +96,7 @@
         msg: "Duplicate MSSQL: {{ server }}:{{ port }}"
       when:
         - platform == 'MSSQL'
-        - host_id in inventory_data.all.children.mssql_databases.children[bu_group].hosts
+        - host_id in inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts
 
     # ---------- Oracle (per-database) ----------
     - name: Add Oracle host
@@ -108,8 +108,8 @@
               'children': {
                 'oracle_databases': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children.oracle_databases.children[bu_group].hosts | combine({
+                    bu_oracle_group: {
+                      'hosts': inventory_data.all.children.oracle_databases.children[bu_oracle_group].hosts | combine({
                         host_id: {
                           'oracle_server': server,
                           'oracle_service': (service if service != 'null' else database),
@@ -136,8 +136,8 @@
               'children': {
                 'sybase_databases': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children.sybase_databases.children[bu_group].hosts | combine({
+                    bu_sybase_group: {
+                      'hosts': inventory_data.all.children.sybase_databases.children[bu_sybase_group].hosts | combine({
                         host_id: {
                           'sybase_server': server,
                           'sybase_database': database,
@@ -167,8 +167,8 @@
               'children': {
                 'postgres_databases': {
                   'children': {
-                    bu_group: {
-                      'hosts': inventory_data.all.children.postgres_databases.children[bu_group].hosts | combine({
+                    bu_postgres_group: {
+                      'hosts': inventory_data.all.children.postgres_databases.children[bu_postgres_group].hosts | combine({
                         host_id: {
                           'postgres_server': server,
                           'postgres_database': database,

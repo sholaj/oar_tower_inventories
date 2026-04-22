@@ -7,26 +7,39 @@ consumed by `linux-inspec` scan playbooks.
 ## Output Format
 
 Each converter run produces a **single-BU fragment** laid out as
-technology groups (`mssql_databases`, `oracle_databases`, etc.) with
-the BU as a child group (`db_<bu>`) owning the BU-scoped vars. The
-platform is implicit from the parent group — **no `database_platform`
-var on individual hosts**.
+technology groups (`mssql_databases`, `oracle_databases`, etc.) each
+owning a **platform-specific** BU subgroup (`db_<bu>_mssql`,
+`db_<bu>_oracle`, …). A top-level `db_<bu>` aggregator holds the
+BU-wide vars and aggregates the per-platform subgroups so
+`--limit db_<bu>` still targets every host in a BU across platforms.
+The platform is implicit from the parent tech group — **no
+`database_platform` var on individual hosts**.
+
+Why platform-specific subgroup names: Ansible inventory YAML treats
+group names as global keys. A single `db_<bu>` placed as a direct
+child of multiple tech groups would be one merged group, polluting
+`mssql_databases` with Oracle/Sybase hosts (and vice versa).
 
 Example:
 
 ```yaml
 all:
   children:
+    db_alpha:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: alpha
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "[DELEGATE_HOST]"
+      children:
+        db_alpha_mssql:
+        db_alpha_oracle:
+
     mssql_databases:
       children:
-        db_alpha:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: alpha
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+        db_alpha_mssql:
           hosts:
             DBSERVER01_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -35,11 +48,10 @@ all:
               mssql_database: master
               mssql_username: nist_scan_user
               use_winrm: false
+
     oracle_databases:
       children:
-        db_alpha:
-          vars:
-            # same BU vars as above
+        db_alpha_oracle:
           hosts:
             ORADB01_1521:
               oracle_server: "[DB_SERVER].example.internal"
@@ -54,8 +66,9 @@ all:
 For an env-level file containing corp + affiliates, run the converter
 once per BU and merge the fragments into a single file like
 `DEVTEST_NA_Inv_InSpec_Database` in the repo root. The tech groups
-(`mssql_databases`, ...) stay the same; only the `children` block
-grows with additional `db_<bu>` entries.
+(`mssql_databases`, ...) stay the same; each merge adds a new
+`db_<bu>` aggregator at the top level and new `db_<bu>_<plat>`
+subgroup entries under each tech group.
 
 ## Required Parameters (both converters)
 
@@ -251,16 +264,21 @@ ansible-playbook convert_cmdb_to_inventory.yml \
 ```yaml
 all:
   children:
+    db_alpha:
+      vars:
+        ssc_sn_environment: test
+        ssc_sn_region: na
+        ssc_sn_bu: alpha
+        exec_timeout: 600
+        ansible_connection: local
+        inspec_delegate_host: "[DELEGATE_HOST]"
+      children:
+        db_alpha_mssql:
+        db_alpha_oracle:
+
     oracle_databases:
       children:
-        db_alpha:
-          vars:
-            ssc_sn_environment: test
-            ssc_sn_region: na
-            ssc_sn_bu: alpha
-            exec_timeout: 600
-            ansible_connection: local
-            inspec_delegate_host: "[DELEGATE_HOST]"
+        db_alpha_oracle:
           hosts:
             CDB1_EXAMPLEDB1:
               oracle_server: "[DB_SERVER].example.internal"
@@ -271,8 +289,7 @@ all:
 
     mssql_databases:
       children:
-        db_alpha:
-          vars: { }   # same BU vars
+        db_alpha_mssql:
           hosts:
             EXAMPLEHOST_1433:
               mssql_server: "[DB_SERVER].example.internal"
@@ -304,5 +321,8 @@ control of placement.
 - Credentials (passwords) are injected by AAP2 Custom Credential at runtime;
   inventories carry usernames only.
 - The contract each single-platform playbook relies on is simply
-  `hosts: <plat>_databases` (e.g. `mssql_databases`). The BU child
-  group (`db_<bu>`) lets you `--limit db_alpha` to scope to one BU.
+  `hosts: <plat>_databases` (e.g. `mssql_databases`). The top-level
+  `db_<bu>` aggregator lets you `--limit db_alpha` to scope to one
+  BU across all platforms; combined with the playbook's
+  `hosts: <plat>_databases` Ansible intersects the two groups and
+  the scan runs against `db_alpha_<plat>` only.

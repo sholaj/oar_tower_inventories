@@ -2,7 +2,7 @@
 # Process single Oracle CMDB row (DictReader output, called from convert_cmdb_to_inventory.yml).
 # Expected dict keys: Name (DATABASE@SERVER.DOMAIN), Version, Validation Status, Comments
 # Emits one host into
-#   inventory_data.all.children.oracle_databases.children[bu_group].hosts
+#   inventory_data.all.children.oracle_databases.children[bu_oracle_group].hosts
 # No per-host database_platform var -- platform is implicit from the parent group.
 # Connection warnings are NOT written to the inventory; they are appended to
 # connection_warnings (sidecar diagnostics) instead.
@@ -75,8 +75,8 @@
                   'children': {
                     'oracle_databases': {
                       'children': {
-                        bu_group: {
-                          'hosts': inventory_data.all.children.oracle_databases.children[bu_group].hosts | combine({
+                        bu_oracle_group: {
+                          'hosts': inventory_data.all.children.oracle_databases.children[bu_oracle_group].hosts | combine({
                             host_id: {
                               'oracle_server': oracle_fqdn,
                               'oracle_service': oracle_db_name,
