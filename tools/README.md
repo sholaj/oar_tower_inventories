@@ -41,8 +41,8 @@ all:
       children:
         db_alpha_mssql:
           hosts:
-            DBSERVER01_1433:
-              mssql_server: "[DB_SERVER].example.internal"
+            dbserver01.example.internal:
+              mssql_server: dbserver01.example.internal
               mssql_port: 1433
               mssql_version: "2019"
               mssql_database: master
@@ -53,8 +53,8 @@ all:
       children:
         db_alpha_oracle:
           hosts:
-            ORADB01_1521:
-              oracle_server: "[DB_SERVER].example.internal"
+            oradb01.example.internal:
+              oracle_server: oradb01.example.internal
               oracle_port: 1521
               oracle_service: ORCL
               oracle_version: "19"
@@ -105,31 +105,31 @@ PLATFORM SERVER DATABASE SERVICE PORT VERSION [CONNECTION] [MODE_SUFFIX]
 | PORT | Yes | Database port |
 | VERSION | Yes | Database version |
 | CONNECTION | No | `WINRM` or `DIRECT` (default: `DIRECT`) |
-| MODE_SUFFIX | No | Free-text qualifier appended to `host_id` so the same `server:port` can have multiple inventory entries with distinct ids (e.g. `direct`, `winrm`, `EE`, `DELEGATE_CONNECTION`). When set, `CONNECTION` must also be set (use `DIRECT` as a placeholder). |
+| MODE_SUFFIX | No | Free-text qualifier appended to the FQDN so the same server can have multiple inventory entries with distinct ids (e.g. `direct`, `winrm`, `cdb1`, `pdb2`). When set, `CONNECTION` must also be set (use `DIRECT` as a placeholder). Also needed when you want multiple databases on the same FQDN to each get their own inventory entry (without a suffix they'd all collide on the same key). |
 
-#### Multi-mode example (matches the live env naming convention)
+#### Multi-mode example
 
 ```text
 # Same MSSQL server, two scan variants
-MSSQL gdctwvc0007 master svc 1733 2019 DIRECT direct
-MSSQL gdctwvc0007 master svc 1733 2019 WINRM  winrm
+MSSQL mssql01.example.internal master svc 1733 2019 DIRECT direct
+MSSQL mssql01.example.internal master svc 1733 2019 WINRM  winrm
 
-# Same Oracle DB, two execution modes
-ORACLE o02dil0 mydb mydb 1528 19 DIRECT EE
-ORACLE o02dil0 mydb mydb 1528 19 DIRECT DELEGATE_CONNECTION
+# Same Oracle server, two services
+ORACLE ora01.example.internal cdb1 cdb1 1528 19 DIRECT cdb1
+ORACLE ora01.example.internal pdb2 pdb2 1528 19 DIRECT pdb2
 
 # No suffix — single entry
-SYBASE s01dms0 master master 5000 16
+SYBASE syb01.example.internal master master 5000 16
 ```
 
-Resulting `host_id` values:
+Resulting `host_id` values (inventory keys):
 
 ```
-gdctwvc0007_1733_direct
-gdctwvc0007_1733_winrm
-o02dil0_mydb_1528_EE
-o02dil0_mydb_1528_DELEGATE_CONNECTION
-s01dms0_master_5000
+mssql01.example.internal_direct
+mssql01.example.internal_winrm
+ora01.example.internal_cdb1
+ora01.example.internal_pdb2
+syb01.example.internal
 ```
 
 The suffix is purely a label — it does **not** auto-set `use_winrm`,
@@ -178,10 +178,14 @@ MSSQL linuxsql01 master svc1 1433 2019 DIRECT
 
 ### Deduplication
 
-| Platform | Dedup key |
-|----------|-----------|
-| MSSQL | `server:port` (server-level scanning) |
-| Oracle / Sybase / Postgres | per database |
+| Platform | inventory_hostname | Dedup behaviour on same-FQDN collision |
+|----------|-------------------|-----------------------------------------|
+| MSSQL | `<fqdn>` (or `<fqdn>_<mode_suffix>` when given) | first row wins, later rows logged + ignored |
+| Oracle / Sybase / Postgres | `<fqdn>` (or `<fqdn>_<mode_suffix>` when given) | last row wins, earlier entries overwritten — flatfile processor logs a warning |
+
+The `inventory_hostname` is the FQDN as-is (dots and dashes preserved). If the same FQDN hosts multiple databases / instances and you want each as its own inventory entry, provide a `MODE_SUFFIX` (flatfile 8th column, e.g. `direct`, `winrm`, `cdb1`, `pdb2`) — the suffix is appended to the FQDN so each row yields a distinct key.
+
+The underlying connection metadata (`mssql_port`, `oracle_service`, `sybase_database`, etc.) is still recorded on the host vars — only the YAML key has changed from `<short-host>_<port>`-style to `<fqdn>`-style.
 
 ---
 
@@ -280,8 +284,8 @@ all:
       children:
         db_alpha_oracle:
           hosts:
-            CDB1_EXAMPLEDB1:
-              oracle_server: "[DB_SERVER].example.internal"
+            ora01.example.internal:
+              oracle_server: ora01.example.internal
               oracle_service: CDB1
               oracle_port: 1521
               oracle_version: "19c"
@@ -291,8 +295,8 @@ all:
       children:
         db_alpha_mssql:
           hosts:
-            EXAMPLEHOST_1433:
-              mssql_server: "[DB_SERVER].example.internal"
+            mssql01.example.internal:
+              mssql_server: mssql01.example.internal
               mssql_port: 1433
               mssql_version: "2019"
               mssql_instance: MSSQLSERVER

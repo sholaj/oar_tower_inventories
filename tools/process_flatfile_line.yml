@@ -43,16 +43,44 @@
       ansible.builtin.set_fact:
         use_winrm: "{{ connection_mode == 'WINRM' }}"
 
-    - name: Build host_id (MSSQL = server:port; others = server:database:port; +suffix when given)
+    - name: Build host_id (FQDN, optionally + mode_suffix)
+      # inventory_hostname = FQDN as-is (dots preserved, no port /
+      # database / service disambiguator). mode_suffix IS appended
+      # when provided since its whole purpose is to allow multiple
+      # inventory entries per server (e.g. direct vs winrm).
+      # Multiple databases/instances on the same server without a
+      # mode_suffix will collide; the collision is surfaced by the
+      # "Warn on host_id collision" step below.
       ansible.builtin.set_fact:
-        host_id: >-
-          {{
-            ((server.split('.')[0] + '_' + port) | replace('.', '_') | replace('-', '_')
-             + ('_' + mode_suffix if mode_suffix | length > 0 else ''))
-            if platform == 'MSSQL'
-            else ((server.split('.')[0] + '_' + database + '_' + port) | replace('.', '_') | replace('-', '_')
-                  + ('_' + mode_suffix if mode_suffix | length > 0 else ''))
-          }}
+        host_id: "{{ server + ('_' + mode_suffix if mode_suffix | length > 0 else '') }}"
+
+    - name: Pre-compute target tech-group host bucket for collision check
+      ansible.builtin.set_fact:
+        _existing_hosts: >-
+          {%- if platform == 'MSSQL' -%}
+          {{ inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts }}
+          {%- elif platform == 'ORACLE' -%}
+          {{ inventory_data.all.children.oracle_databases.children[bu_oracle_group].hosts }}
+          {%- elif platform == 'SYBASE' -%}
+          {{ inventory_data.all.children.sybase_databases.children[bu_sybase_group].hosts }}
+          {%- elif platform in ['POSTGRES', 'POSTGRESQL'] -%}
+          {{ inventory_data.all.children.postgres_databases.children[bu_postgres_group].hosts }}
+          {%- else -%}
+          {}
+          {%- endif -%}
+      when: platform in ['MSSQL', 'ORACLE', 'SYBASE', 'POSTGRES', 'POSTGRESQL']
+
+    - name: Warn on host_id collision (same FQDN already registered for this platform)
+      ansible.builtin.debug:
+        msg: >-
+          WARNING line {{ idx + 1 }}: host_id '{{ host_id }}' ({{ platform }})
+          already exists under {{ bu_group }} — add a MODE_SUFFIX (8th
+          column) to keep both rows, or this row will
+          {{ 'be ignored (first-wins dedup)' if platform == 'MSSQL'
+             else 'overwrite the previous entry' }}.
+      when:
+        - platform in ['MSSQL', 'ORACLE', 'SYBASE', 'POSTGRES', 'POSTGRESQL']
+        - host_id in (_existing_hosts | default({}))
 
     # NOTE: host-add and counter-bump are merged into a single set_fact per
     # platform. Splitting across tasks under a shared block `when:` causes

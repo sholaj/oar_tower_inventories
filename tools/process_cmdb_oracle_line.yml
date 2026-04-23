@@ -54,9 +54,19 @@
               {{ oracle_version_map[(item['Version'] | default('')).split('.')[0]]
                  | default((item['Version'] | default('')).split('.')[0] + 'c') }}
 
-        - name: Build Oracle host_id
+        - name: Build Oracle host_id (FQDN)
+          # inventory_hostname = FQDN as-is (dots preserved, no
+          # disambiguator). Multiple Oracle services on the same FQDN
+          # will collide — the later row overwrites the earlier one
+          # under combine(), and Ansible emits a warning via the
+          # collision-detection step below.
           ansible.builtin.set_fact:
-            host_id: "{{ (oracle_db_name + '_' + oracle_fqdn.split('.')[0]) | replace('.', '_') | replace('-', '_') }}"
+            host_id: "{{ oracle_fqdn }}"
+
+        - name: Detect Oracle FQDN collision (multiple services on same server)
+          ansible.builtin.set_fact:
+            connection_warnings: "{{ connection_warnings + [{'platform': 'oracle', 'host': raw_name, 'comment': 'FQDN collision — previous service at ' + host_id + ' will be overwritten'}] }}"
+          when: host_id in inventory_data.all.children.oracle_databases.children[bu_oracle_group].hosts
 
         - name: Detect connection warnings
           ansible.builtin.set_fact:

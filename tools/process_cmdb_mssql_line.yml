@@ -52,13 +52,23 @@
           ansible.builtin.set_fact:
             mssql_port: "{{ cp_port if (cp_port | trim | length > 0) else '1433' }}"
 
-        - name: Build MSSQL host_id (server:port)
+        - name: Build MSSQL host_id (FQDN)
+          # inventory_hostname = FQDN as-is (dots preserved, no port
+          # suffix). Multi-instance MSSQL servers (same FQDN, different
+          # port) will collide. The existing first-wins dedup still
+          # applies — the later row is ignored and the collision is
+          # recorded in connection_warnings for triage.
           ansible.builtin.set_fact:
-            host_id: "{{ (mssql_fqdn.split('.')[0] + '_' + mssql_port | string) | replace('.', '_') | replace('-', '_') }}"
+            host_id: "{{ mssql_fqdn }}"
 
-        - name: Log duplicate MSSQL server
+        - name: Log duplicate MSSQL server (FQDN collision)
           ansible.builtin.debug:
-            msg: "Duplicate MSSQL: {{ mssql_fqdn }}:{{ mssql_port }} (instance {{ mssql_instance_name }})"
+            msg: "Duplicate MSSQL FQDN: {{ mssql_fqdn }} (instance {{ mssql_instance_name }}, port {{ mssql_port }}) — this row ignored"
+          when: host_id in inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts
+
+        - name: Record MSSQL FQDN collision in diagnostics
+          ansible.builtin.set_fact:
+            connection_warnings: "{{ connection_warnings + [{'platform': 'mssql', 'host': raw_name, 'comment': 'FQDN collision — entry already exists at ' + host_id + '; this row (port ' + mssql_port | string + ', instance ' + mssql_instance_name + ') ignored'}] }}"
           when: host_id in inventory_data.all.children.mssql_databases.children[bu_mssql_group].hosts
 
         - name: Detect connection warnings (new MSSQL hosts only)
